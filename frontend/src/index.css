@@ -497,7 +497,14 @@ a {
 
 @media (max-width: 720px) {
   .product-detail {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .product-detail-media,
+  .product-detail-info,
+  .product-detail-desc {
+    min-width: 0;
+    width: 100%;
   }
 }
 
@@ -1136,4 +1143,125 @@ a {
   border: 1px solid var(--border);
   border-radius: 10px;
   font-size: 0.85rem;
+}
+
+.mobile-menu-btn {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  align-items: center;
+  justify-content: center;
+  margin-left: 8px;
+}
+/* ---------------- Mobile ---------------- */
+@media (max-width: 720px) {
+  .navbar-inner {
+    padding: 12px 20px;
+  }
+
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  .nav-links {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.2s ease;
+  }
+
+  .nav-links.open {
+    max-height: 260px;
+  }
+
+  .nav-links a {
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 600px) {
+  .hero h1 {
+    font-size: 2.2rem;
+  }
+
+  .hero p {
+    font-size: 0.95rem;
+  }
+
+  .hero-content {
+    padding: 0 20px;
+  }
+
+  .section {
+    padding: 48px 20px;
+  }
+
+  .section-header h2 {
+    font-size: 1.5rem;
+  }
+
+  .footer {
+    padding: 20px;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .carousel-slide {
+    height: 240px;
+  }
+
+  .product-detail-info h1 {
+    font-size: 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .modal {
+    padding: 20px;
+  }
+
+  .cart-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .pd-qty-selector {
+    flex-wrap: wrap;
+  }
+
+  .pd-qty-price-wrap {
+    align-items: flex-start;
+  }
+
+  .awb-editor {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .awb-editor button {
+    align-self: stretch;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

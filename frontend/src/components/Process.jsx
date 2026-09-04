@@ -2,22 +2,22 @@ const steps = [
   {
     icon: "▤",
     title: "From Client Idea",
-    text: "Whatever you say goes — send a photo, an STL file, a rough idea or even notes scribbled on paper, and we take it from there.",
+    text: "Send a photo, a rough sketch, an STL file, or just a description of what you need. We'll turn it into a plan from there."
   },
   {
     icon: "✎",
     title: "Processing",
-    text: "From your image I build a sketch with accurate measurements and proportions that read well to the eye. If you already have an STL, I can remesh and clean it up.",
+    text: "Every project starts with an accurate 3D model. If you already have an STL, we clean and prep it for printing. If not, we build one from scratch to match your specs.",
   },
   {
     icon: "🖶",
     title: "Printing",
-    text: "I prepare the object for my printers and pick the material for the use case — indoor or outdoor, sunlight or underwater, high temperature or simply sitting on your desk.",
+    text: "We choose the right material for the job — weather-resistant, food-safe, high-heat, or standard — and run it on calibrated printers to keep tolerances tight.",
   },
   {
     icon: "◈",
     title: "To Client",
-    text: "After printing I go over every part to make sure it matches what you asked for, then package it carefully and ship with trusted couriers — delivery in 4-8 days.",
+    text: "Each piece is inspected against the original request before it ships. Orders go out with a trusted courier, arriving within 4–8 business days.",
   },
 ];
 

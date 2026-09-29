@@ -28,24 +28,29 @@ export default function CartDrawer() {
     }
     setPlacing(true);
     try {
+      // The server recalculates prices itself; only ids and quantities matter.
       const res = await createOrder({
-        total,
         items: items.map(({ product, qty }) => ({
           productId: product.id,
-          name: product.name,
-          price: product.price,
           qty,
         })),
       });
-      const confirmedOrderNumber = res.data.order_number; // authoritative, from the server
+
+      const checkoutUrl = res.data.checkoutUrl;
+      if (!checkoutUrl) {
+        throw new Error("No checkout URL returned");
+      }
+
+      // The order now exists on the server (unpaid), so the cart can be emptied.
+      // Payment is confirmed by Stripe -> server webhook, not by this page.
       clearCart();
       closeCart();
-      alert(`Order ${confirmedOrderNumber} placed!`);
+      window.location.href = checkoutUrl; // redirect to Stripe's hosted payment page
+      return; // keep the button disabled while the browser navigates
     } catch {
-      alert("Couldn't place the order. Please try again.");
-    } finally {
-      setPlacing(false);
+      alert("Couldn't start the payment. Please try again.");
     }
+    setPlacing(false);
   };
   return (
     <div className="modal-overlay" onClick={closeCart}>
@@ -130,7 +135,7 @@ export default function CartDrawer() {
                   onClick={handleCheckout}
                   disabled={placing}
                 >
-                  {placing ? "Placing order..." : "Checkout"}
+                  {placing ? "Redirecting to payment..." : "Pay now"}
                 </button>
               </div>
             </div>

@@ -205,6 +205,8 @@ export default function AdminPage() {
     }
   };
 
+  // The server sends the customer email itself when this request succeeds
+  // (only when moving to "completed"), so nothing extra is needed here.
   const handleToggleOrderStatus = async (order) => {
     const nextStatus = order.status === "completed" ? "pending" : "completed";
     setUpdatingOrderId(order.id);
@@ -233,6 +235,7 @@ export default function AdminPage() {
     }));
   };
 
+  // The server sends the "shipped" email itself when the AWB number changes.
   const handleSaveAwb = async (order) => {
     const draft = awbDrafts[order.id] || {};
     setSavingAwbId(order.id);
@@ -349,7 +352,7 @@ export default function AdminPage() {
               ? "Updating..."
               : order.status === "completed"
               ? "Reopen order"
-              : "Mark completed"}
+              : "Finish order"}
           </button>
         </div>
       </div>

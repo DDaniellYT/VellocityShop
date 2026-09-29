@@ -21,20 +21,25 @@ export default function AccountPage() {
   const { user, logout } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
-
   useEffect(() => {
-    if (!user) return;
-      (async () => {
-        try {
-          const res = await getMyOrders();
-          setOrders(res.data);
-        } catch {
-          // ignore — empty state will show
-        } finally {
-          setLoadingOrders(false);
-        }
-      })();
-    }, [user]);
+    if (!user) {
+      setLoadingOrders(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const res = await getMyOrders();
+        setOrders(res.data);
+      } catch (err) {
+        console.error("Failed to load orders:", err);
+        setOrders([]);
+      } finally {
+        setLoadingOrders(false);
+      }
+    })();
+  }, [user]);
+
     
   useEffect(() => {
     if (!user) navigate("/login");

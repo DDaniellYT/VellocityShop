@@ -13,6 +13,7 @@ require("dotenv").config();
 require("express-async-errors"); // must be required before routes are defined
 
 const jwt = require("jsonwebtoken");
+const Stripe = require("stripe");
 
 const express = require("express");
 const cors = require("cors");
@@ -65,6 +66,35 @@ if (!JWT_SECRET || JWT_SECRET === "replace-this-with-a-long-random-string") {
 }
 
 // ---------------------------------------------------------------------------
+// Stripe
+// ---------------------------------------------------------------------------
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const STRIPE_CURRENCY = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
+
+if (!STRIPE_SECRET_KEY) {
+  throw new Error("STRIPE_SECRET_KEY is missing. Add it to your .env file.");
+}
+if (!STRIPE_WEBHOOK_SECRET) {
+  throw new Error("STRIPE_WEBHOOK_SECRET is missing. Add it to your .env file.");
+}
+
+const stripe = new Stripe(STRIPE_SECRET_KEY);
+
+// ---------------------------------------------------------------------------
+// DB migration: payment columns on orders (safe to run on every start)
+// ---------------------------------------------------------------------------
+function ensureColumn(table, column, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
+}
+ensureColumn("orders", "payment_status", "TEXT DEFAULT 'unpaid'");
+ensureColumn("orders", "stripe_session_id", "TEXT");
+ensureColumn("orders", "paid_at", "TEXT");
+
+// ---------------------------------------------------------------------------
 // Core middleware
 // ---------------------------------------------------------------------------
 app.use(helmet());
@@ -80,6 +110,55 @@ const allowedOrigins =
 
 app.use(cors({ origin: allowedOrigins }));
 
+// ---------------------------------------------------------------------------
+// Stripe webhook — MUST be registered BEFORE express.json(), because Stripe
+// signature verification needs the raw, unparsed request body.
+// ---------------------------------------------------------------------------
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        req.headers["stripe-signature"],
+        STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.error("Stripe webhook signature check failed:", err.message);
+      return res.status(400).send("Webhook signature verification failed");
+    }
+
+    const session = event.data.object;
+
+    switch (event.type) {
+      case "checkout.session.completed":
+        // For instant methods (cards) this is already "paid".
+        // For delayed methods it stays "unpaid" until async_payment_succeeded.
+        if (session.payment_status === "paid") markOrderPaid(session);
+        break;
+
+      case "checkout.session.async_payment_succeeded":
+        markOrderPaid(session);
+        break;
+
+      case "checkout.session.async_payment_failed":
+        setUnpaidOrderStatus(session, "failed");
+        break;
+
+      case "checkout.session.expired":
+        setUnpaidOrderStatus(session, "expired");
+        break;
+
+      default:
+        break;
+    }
+
+    // Always acknowledge, otherwise Stripe keeps retrying.
+    res.json({ received: true });
+  }
+);
 
 app.use(express.json({ limit: "200kb" }));
 
@@ -110,16 +189,29 @@ const registerLimiter = rateLimit({
   message: { error: "Too many accounts created from this network. Please try again later." },
 });
 
+const checkoutLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many checkout attempts. Please try again shortly." },
+});
+
 // ---------------------------------------------------------------------------
-// Mail
+// Mail           
 // ---------------------------------------------------------------------------
+const smtpPort = Number(process.env.SMTP_PORT) || 587;
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: false,
+  port: smtpPort,
+  secure: smtpPort === 465,
+  family: 4, // force IPv4, this network has no IPv6 route
   auth: process.env.SMTP_USER
     ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
     : undefined,
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
 });
 
 function generateCode() {
@@ -135,6 +227,119 @@ async function sendCodeEmail(toEmail, code) {
     subject: "Your Vellocity3D verification code",
     text: `Your verification code is ${code}. It expires in 5 minutes.`,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Order status emails (template + sender)
+// ---------------------------------------------------------------------------
+const escapeHtml = (s) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[c]));
+
+function renderOrderEmail({ kind, order, items, username }) {
+  const itemsText = items
+    .map((i) => `- ${i.product_name} x${i.qty} — $${(i.price * i.qty).toFixed(2)}`)
+    .join("\n");
+
+  const itemsHtml = items
+    .map(
+      (i) => `
+      <tr>
+        <td style="padding:6px 0">${escapeHtml(i.product_name)} × ${i.qty}</td>
+        <td style="padding:6px 0;text-align:right">$${(i.price * i.qty).toFixed(2)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const templates = {
+    paid: {
+      subject: `Payment received for order ${order.order_number}`,
+      headline: "Payment received",
+      intro: `Hi ${username}, we received your payment. We'll start preparing your order.`,
+      extra: "",
+    },
+    awb: {
+      subject: `Your order ${order.order_number} has been shipped`,
+      headline: "Your order is on its way",
+      intro: `Hi ${username}, your order has been handed to ${order.carrier || "the carrier"}.`,
+      extra: order.awb_number
+        ? `Tracking (AWB): ${order.awb_number} — Carrier: ${order.carrier || "-"}`
+        : "",
+    },
+    completed: {
+      subject: `Your order ${order.order_number} is complete`,
+      headline: "Your order is complete",
+      intro: `Hi ${username}, your order has been completed. Thank you for shopping with us!`,
+      extra: order.awb_number ? `Tracking (AWB): ${order.awb_number}` : "",
+    },
+  };
+
+  const t = templates[kind];
+  if (!t) throw new Error(`Unknown email kind: ${kind}`);
+
+  const text = `
+${t.headline}
+
+${t.intro}
+
+Order: ${order.order_number}
+${t.extra}
+
+${itemsText}
+
+Total: $${Number(order.total).toFixed(2)}
+  `.trim();
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;max-width:560px;margin:0 auto">
+      <h2>${escapeHtml(t.headline)}</h2>
+      <p>${escapeHtml(t.intro)}</p>
+      <p><strong>Order:</strong> ${escapeHtml(order.order_number)}<br>
+         ${t.extra ? escapeHtml(t.extra) : ""}</p>
+      <table style="width:100%;border-collapse:collapse">${itemsHtml}</table>
+      <p style="text-align:right"><strong>Total: $${Number(order.total).toFixed(2)}</strong></p>
+    </div>`;
+
+  return { subject: t.subject, text, html };
+}
+
+// Never throws — a failed email must not make the admin action fail.
+async function sendOrderStatusEmail(orderId, kind) {
+  try {
+    if (!process.env.SMTP_HOST) return; // no SMTP configured yet
+
+    const order = db
+      .prepare(
+        `SELECT orders.*, users.username, users.email
+         FROM orders JOIN users ON users.id = orders.user_id
+         WHERE orders.id = ?`
+      )
+      .get(orderId);
+    if (!order) return;
+
+    const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(orderId);
+    const { subject, text, html } = renderOrderEmail({
+      kind,
+      order,
+      items,
+      username: order.username,
+    });
+
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || "no-reply@vellocity3d.com",
+      to: order.email,
+      subject,
+      text,
+      html,
+    });
+  } catch (err) {
+    console.error(`Failed to send "${kind}" email for order ${orderId}:`, err.message);
+  }
 }
 
 async function isPasswordPwned(password) {
@@ -406,61 +611,61 @@ app.post("/api/auth/resend-verification", registerLimiter, async (req, res) => {
     )}`;
 
   try {
-  await transporter.sendMail({
-    from:
-      process.env.SMTP_FROM ||
-      "no-reply@vellocity3d.com",
-    to: email,
-    subject: "Verify your Vellocity3D account",
+    await transporter.sendMail({
+      from:
+        process.env.SMTP_FROM ||
+        "no-reply@vellocity3d.com",
+      to: email,
+      subject: "Verify your Vellocity3D account",
 
-    text: `
+      text: `
 Verify your Vellocity3D account:
 
 ${verifyUrl}
 
 This verification link expires in 24 hours.
-    `.trim(),
+      `.trim(),
 
-    html: `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-        <h2>Verify your Vellocity3D account</h2>
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+          <h2>Verify your Vellocity3D account</h2>
 
-        <p>
-          Thanks for creating your account.
-          Click the button below to verify your email address.
-        </p>
+          <p>
+            Thanks for creating your account.
+            Click the button below to verify your email address.
+          </p>
 
-        <p>
-          <a
-            href="${verifyUrl}"
-            style="
-              display:inline-block;
-              padding:12px 20px;
-              background:#635bff;
-              color:white;
-              text-decoration:none;
-              border-radius:6px;
-            "
-          >
-            Verify my email
-          </a>
-        </p>
+          <p>
+            <a
+              href="${verifyUrl}"
+              style="
+                display:inline-block;
+                padding:12px 20px;
+                background:#635bff;
+                color:white;
+                text-decoration:none;
+                border-radius:6px;
+              "
+            >
+              Verify my email
+            </a>
+          </p>
 
-        <p>This verification link expires in 24 hours.</p>
-      </div>
-    `,
-  });
-} catch (err) {
-  console.error(
-    "Failed to send verification email:",
-    err
-  );
+          <p>This verification link expires in 24 hours.</p>
+        </div>
+      `,
+    });
+  } catch (err) {
+    console.error(
+      "Failed to send verification email:",
+      err
+    );
 
-  return res.status(500).json({
-    error:
-      "Account could not be created because the verification email could not be sent.",
-  });
-}
+    return res.status(500).json({
+      error:
+        "Account could not be created because the verification email could not be sent.",
+    });
+  }
 
   return res.json({
     message:
@@ -649,6 +854,72 @@ app.get("/api/carousel", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Payments (Stripe Checkout)
+// ---------------------------------------------------------------------------
+async function createCheckoutSession(order, items) {
+  if (!process.env.APP_URL) throw new Error("APP_URL is missing");
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
+    client_reference_id: String(order.id),
+    metadata: { order_id: String(order.id), order_number: order.order_number },
+    payment_intent_data: {
+      metadata: { order_id: String(order.id), order_number: order.order_number },
+    },
+    line_items: items.map((i) => ({
+      quantity: i.qty,
+      price_data: {
+        currency: STRIPE_CURRENCY,
+        unit_amount: Math.round(i.price * 100), // smallest currency unit
+        product_data: { name: i.product_name },
+      },
+    })),
+    success_url: `${process.env.APP_URL}/?payment=success&order=${encodeURIComponent(
+      order.order_number
+    )}`,
+    cancel_url: `${process.env.APP_URL}/?payment=cancelled&order=${encodeURIComponent(
+      order.order_number
+    )}`,
+  });
+
+  db.prepare("UPDATE orders SET stripe_session_id = ? WHERE id = ?").run(session.id, order.id);
+  return session;
+}
+
+function markOrderPaid(session) {
+  const orderId = Number(session.metadata && session.metadata.order_id);
+  if (!orderId) return;
+
+  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId);
+  if (!order) return;
+  if (order.payment_status === "paid") return; // webhooks can be delivered more than once
+
+  // Safety check: what Stripe charged must match what we expected.
+  const expectedCents = Math.round(Number(order.total) * 100);
+  if (session.amount_total !== expectedCents) {
+    console.error(
+      `Stripe amount mismatch for order ${order.order_number}: expected ${expectedCents}, got ${session.amount_total}`
+    );
+    return;
+  }
+
+  db.prepare(
+    "UPDATE orders SET payment_status = 'paid', paid_at = ?, stripe_session_id = ? WHERE id = ?"
+  ).run(new Date().toISOString(), session.id, order.id);
+
+  sendOrderStatusEmail(order.id, "paid"); // not awaited on purpose
+}
+
+function setUnpaidOrderStatus(session, newStatus) {
+  const orderId = Number(session.metadata && session.metadata.order_id);
+  if (!orderId) return;
+  // Only touch orders still waiting on THIS session; never downgrade a paid order.
+  db.prepare(
+    "UPDATE orders SET payment_status = ? WHERE id = ? AND payment_status = 'unpaid' AND stripe_session_id = ?"
+  ).run(newStatus, orderId, session.id);
+}
+
+// ---------------------------------------------------------------------------
 // Orders
 // ---------------------------------------------------------------------------
 function generateOrderNumber() {
@@ -667,7 +938,8 @@ function generateUniqueOrderNumber() {
 
 // Price/total are ALWAYS derived server-side from the products table —
 // never trust price or total sent by the client.
-app.post("/api/orders", requireAuth, (req, res) => {
+// Creates the order as "unpaid" and returns a Stripe Checkout URL to redirect to.
+app.post("/api/orders", requireAuth, checkoutLimiter, async (req, res) => {
   const { items } = req.body;
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -675,7 +947,7 @@ app.post("/api/orders", requireAuth, (req, res) => {
   }
 
   const getProduct = db.prepare("SELECT * FROM products WHERE id = ?");
-  let total = 0;
+  let totalCents = 0;
   const resolvedItems = [];
 
   for (const item of items) {
@@ -683,8 +955,8 @@ app.post("/api/orders", requireAuth, (req, res) => {
     if (!product) {
       return res.status(400).json({ error: `Invalid product: ${item.productId}` });
     }
-    const qty = Math.max(1, Number(item.qty) || 1);
-    total += product.price * qty;
+    const qty = Math.min(100, Math.max(1, Math.floor(Number(item.qty)) || 1));
+    totalCents += Math.round(product.price * 100) * qty;
     resolvedItems.push({
       product_id: product.id,
       product_name: product.name,
@@ -693,30 +965,72 @@ app.post("/api/orders", requireAuth, (req, res) => {
     });
   }
 
+  const total = totalCents / 100;
   const orderNumber = generateUniqueOrderNumber();
 
   const insertOrder = db.prepare(`
-    INSERT INTO orders (user_id, order_number, total)
-    VALUES (@user_id, @order_number, @total)
+    INSERT INTO orders (user_id, order_number, total, payment_status)
+    VALUES (@user_id, @order_number, @total, 'unpaid')
   `);
-  const orderResult = insertOrder.run({
-    user_id: req.user.id,
-    order_number: orderNumber,
-    total,
-  });
-
   const insertItem = db.prepare(`
     INSERT INTO order_items (order_id, product_id, product_name, price, qty)
     VALUES (@order_id, @product_id, @product_name, @price, @qty)
   `);
-  for (const item of resolvedItems) {
-    insertItem.run({ order_id: orderResult.lastInsertRowid, ...item });
-  }
 
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderResult.lastInsertRowid);
+  const createOrder = db.transaction(() => {
+    const orderResult = insertOrder.run({
+      user_id: req.user.id,
+      order_number: orderNumber,
+      total,
+    });
+    for (const item of resolvedItems) {
+      insertItem.run({ order_id: orderResult.lastInsertRowid, ...item });
+    }
+    return orderResult.lastInsertRowid;
+  });
+
+  const orderId = createOrder();
+  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId);
   const orderItems = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
 
-  res.status(201).json({ ...order, items: orderItems });
+  let session;
+  try {
+    session = await createCheckoutSession(order, orderItems);
+  } catch (err) {
+    console.error("Stripe checkout session failed:", err.message);
+    // Don't leave a dead unpaid order behind.
+    db.transaction(() => {
+      db.prepare("DELETE FROM order_items WHERE order_id = ?").run(order.id);
+      db.prepare("DELETE FROM orders WHERE id = ?").run(order.id);
+    })();
+    return res.status(502).json({ error: "Could not start the payment. Please try again." });
+  }
+
+  res.status(201).json({ ...order, items: orderItems, checkoutUrl: session.url });
+});
+
+// Customer — retry payment for one of their own unpaid orders
+app.post("/api/orders/:id/pay", requireAuth, checkoutLimiter, async (req, res) => {
+  const order = db
+    .prepare("SELECT * FROM orders WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.user.id);
+  if (!order) return res.status(404).json({ error: "Order not found" });
+  if (order.payment_status === "paid") {
+    return res.status(400).json({ error: "This order is already paid" });
+  }
+
+  const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(order.id);
+
+  let session;
+  try {
+    session = await createCheckoutSession(order, items);
+  } catch (err) {
+    console.error("Stripe checkout session failed:", err.message);
+    return res.status(502).json({ error: "Could not start the payment. Please try again." });
+  }
+
+  db.prepare("UPDATE orders SET payment_status = 'unpaid' WHERE id = ?").run(order.id);
+  res.json({ checkoutUrl: session.url });
 });
 
 app.get("/api/orders/mine", requireAuth, (req, res) => {
@@ -750,6 +1064,7 @@ app.get("/api/orders", requireAdmin, (req, res) => {
 });
 
 // Admin — mark an order pending/completed
+// Emails the customer only when the order actually moves to "completed".
 app.patch("/api/orders/:id/status", requireAdmin, (req, res) => {
   const { status } = req.body;
   if (!["pending", "completed"].includes(status)) {
@@ -761,23 +1076,34 @@ app.patch("/api/orders/:id/status", requireAdmin, (req, res) => {
 
   db.prepare("UPDATE orders SET status = ? WHERE id = ?").run(status, req.params.id);
 
+  if (status === "completed" && order.status !== "completed") {
+    sendOrderStatusEmail(order.id, "completed"); // not awaited on purpose
+  }
+
   const updated = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
   const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(req.params.id);
   res.json({ ...updated, items });
 });
 
 // Admin — set/update the AWB number and carrier for an order
+// Emails the customer only when a new/changed AWB number is saved.
 app.patch("/api/orders/:id/awb", requireAdmin, (req, res) => {
   const { awb_number, carrier } = req.body;
 
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
   if (!order) return res.status(404).json({ error: "Order not found" });
 
+  const newAwb = typeof awb_number === "string" ? awb_number.trim() : "";
+
   db.prepare("UPDATE orders SET awb_number = ?, carrier = ? WHERE id = ?").run(
-    awb_number || null,
+    newAwb || null,
     carrier || null,
     req.params.id
   );
+
+  if (newAwb && newAwb !== (order.awb_number || "")) {
+    sendOrderStatusEmail(order.id, "awb"); // not awaited on purpose
+  }
 
   const updated = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
   const items = db.prepare("SELECT * FROM order_items WHERE order_id = ?").all(req.params.id);

@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { register } from "../api.js";
-import { useAuth } from "../AuthContext.jsx";
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const { loginUser } = useAuth();
 
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -24,12 +22,23 @@ export default function RegisterPage() {
     }
 
     setLoading(true);
+
     try {
       const res = await register(username, email, password);
-      loginUser(res.data);
-      navigate("/account");
+
+      // Registration does NOT log the user in.
+      // The backend requires email verification first.
+      alert(
+        res.data.message ||
+          "Account created. Please check your email to verify your account."
+      );
+
+      navigate("/login");
     } catch (err) {
-      setError(err?.response?.data?.error || "Couldn't create the account.");
+      setError(
+        err?.response?.data?.error ||
+          "Couldn't create the account."
+      );
     } finally {
       setLoading(false);
     }
@@ -41,7 +50,13 @@ export default function RegisterPage() {
         <form onSubmit={handleSubmit}>
           <h2>Create account</h2>
           <p>Sign up to track your orders.</p>
-          {error && <div className="status-banner error">{error}</div>}
+
+          {error && (
+            <div className="status-banner error">
+              {error}
+            </div>
+          )}
+
           <div className="form-row">
             <label>Username</label>
             <input
@@ -53,17 +68,19 @@ export default function RegisterPage() {
               required
             />
           </div>
+
           <div className="form-row">
-          <label>Email</label>
-          <input
-            type="email"
-            name="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </div>
+            <label>Email</label>
+            <input
+              type="email"
+              name="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+
           <div className="form-row">
             <label>Password</label>
             <input
@@ -73,9 +90,10 @@ export default function RegisterPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={6}
+              minLength={8}
             />
           </div>
+
           <div className="form-row">
             <label>Confirm password</label>
             <input
@@ -85,22 +103,33 @@ export default function RegisterPage() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
-              minLength={6}
+              minLength={8}
             />
           </div>
+
           <button
             type="submit"
             className="btn btn-primary"
             disabled={loading}
-            style={{ width: "100%", justifyContent: "center" }}
+            style={{
+              width: "100%",
+              justifyContent: "center",
+            }}
           >
-            {loading ? "Creating account..." : "Create account"}
+            {loading
+              ? "Creating account..."
+              : "Create account"}
           </button>
         </form>
+
         <Link
           to="/login"
           className="btn btn-outline"
-          style={{ width: "100%", justifyContent: "center", marginTop: 12 }}
+          style={{
+            width: "100%",
+            justifyContent: "center",
+            marginTop: 12,
+          }}
         >
           Already have an account? Sign in
         </Link>

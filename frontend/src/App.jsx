@@ -6,6 +6,7 @@ import RegisterPage from "./pages/RegisterPage.jsx";
 import AccountPage from "./pages/AccountPage.jsx";
 import NotFoundPage from "./pages/NotFoundPage.jsx";
 import ProductDetailPage from "./pages/ProductDetailPage.jsx";
+import VerifyEmailPage from "./pages/VerifyEmailPage.jsx";
 
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/products/:id" element={<ProductDetailPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/account" element={<AccountPage />} />
       <Route path="/admin" element={<AdminPage />} />
     </Routes>

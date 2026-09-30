@@ -133,11 +133,9 @@ ensureColumn("two_factor_codes", "attempts", "INTEGER DEFAULT 0");
 // ---------------------------------------------------------------------------
 // Core middleware
 // ---------------------------------------------------------------------------
-if (process.env.TRUST_PROXY === "true") {
-  app.set("trust proxy", 1); // must be set before the rate limiters are used
-}
 
-const crossOriginAssets = process.env.CROSS_ORIGIN_ASSETS === "true";
+app.set("trust proxy", 1);
+
 app.use(
   helmet({
     // Only relax this if the frontend lives on a different domain than the API.
@@ -174,6 +172,7 @@ const transporter = nodemailer.createTransport({
     : undefined,
   connectionTimeout: 15000,
   greetingTimeout: 15000,
+  localAddress: '0.0.0.0'
 });
 
 const MAIL_FROM = () => process.env.SMTP_FROM || "no-reply@vellocity3d.com";

@@ -1,6 +1,6 @@
 import axios from "axios";
 
-export const API_ORIGIN = "vellocityshop-production.up.railway.app" || "";
+export const API_ORIGIN = "https://vellocityshop-production.up.railway.app" || "";
 
 const API_BASE_URL = `${API_ORIGIN}/api`;
 

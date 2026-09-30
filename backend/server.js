@@ -97,7 +97,16 @@ ensureColumn("orders", "paid_at", "TEXT");
 // ---------------------------------------------------------------------------
 // Core middleware
 // ---------------------------------------------------------------------------
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        "img-src": ["'self'", "data:", "https://placehold.co"],
+      },
+    },
+  })
+);
 
 if (process.env.TRUST_PROXY === "true") {
   app.set("trust proxy", 1);
@@ -215,12 +224,14 @@ const transporter = nodemailer.createTransport({
 });
 
 function generateCode() {
-  return String(Math.floor(100000 + Math.random() * 900000)); // 6 digits
+  return String(crypto.randomInt(100000, 1000000)); // 6 digits, secure
 }
 
 async function sendCodeEmail(toEmail, code) {
-  console.log(`[2FA] Verification code for ${toEmail}: ${code}`); // visible for local testing
-  if (!process.env.SMTP_HOST) return; // no SMTP configured yet — console log is enough for now
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[2FA] Verification code for ${toEmail}: ${code}`); // local testing only
+  }
+  if (!process.env.SMTP_HOST) return;
   await transporter.sendMail({
     from: process.env.SMTP_FROM || "no-reply@vellocity3d.com",
     to: toEmail,

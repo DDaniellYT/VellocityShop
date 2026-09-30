@@ -172,7 +172,9 @@ const transporter = nodemailer.createTransport({
     : undefined,
   connectionTimeout: 15000,
   greetingTimeout: 15000,
-  localAddress: '0.0.0.0'
+  dnsLookup: (hostname, options, callback) => {
+    require('dns').lookup(hostname, { family: 4 }, callback); // Forces DNS to return IPv4 addresses only
+  }
 });
 
 const MAIL_FROM = () => process.env.SMTP_FROM || "no-reply@vellocity3d.com";

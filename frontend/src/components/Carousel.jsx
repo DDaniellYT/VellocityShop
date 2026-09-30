@@ -10,7 +10,7 @@ export default function Carousel() {
     (async () => {
       try {
         const res = await getCarouselImages();
-        setImages(res.data.map((path) => `http://localhost:5000${path}`));
+        setImages(res.data.map((path) => `vellocityshop-production.up.railway.app:8080${path}`));
       } catch {
         setImages([]);
       } finally {

@@ -7,9 +7,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/api": "http://localhost:5000",
-      "/uploads": "http://localhost:5000",
-      "/carousel": "http://localhost:5000",
+      "/api": "vellocityshop-production.up.railway.app:8080",
+      "/uploads": "vellocityshop-production.up.railway.app:8080",
+      "/carousel": "vellocityshop-production.up.railway.app:8080",
     },
     port: 5173,
     host: true, // listen on all network interfaces, not just localhost

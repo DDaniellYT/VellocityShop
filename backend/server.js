@@ -141,7 +141,7 @@ const crossOriginAssets = process.env.CROSS_ORIGIN_ASSETS === "true";
 app.use(
   helmet({
     // Only relax this if the frontend lives on a different domain than the API.
-    crossOriginResourcePolicy: { policy: crossOriginAssets ? "cross-origin" : "same-origin" },
+    crossOriginResourcePolicy: { policy: "cross-origin" },
     contentSecurityPolicy: {
       directives: {
         ...helmet.contentSecurityPolicy.getDefaultDirectives(),
@@ -151,7 +151,10 @@ app.use(
   })
 );
 
-app.use(cors({ origin: IS_PROD ? [APP_URL] : true }));
+app.use(cors({ 
+  origin: "https://vellocity3d.vercel.app", 
+  credentials: true
+}));
 
 app.use("/carousel", express.static(carouselDir));
 app.use("/uploads", express.static(uploadsDir));

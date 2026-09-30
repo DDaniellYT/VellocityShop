@@ -1343,11 +1343,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-// On Vercel the platform drives the exported app; everywhere else we listen ourselves.
-if (!process.env.VERCEL) {
-  app.listen(PORT, () => {
-    console.log(`Product Shop API listening on port ${PORT}`);
-  });
-}
+
+isten(PORT, '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT}`);
+});
+
 
 module.exports = app;

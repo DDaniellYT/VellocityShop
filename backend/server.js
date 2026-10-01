@@ -29,6 +29,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const db = require("./db");
+const { Resend } = require("resend");
 
 const app = express();
 

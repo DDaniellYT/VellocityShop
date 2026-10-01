@@ -21,7 +21,6 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const nodemailer = require("nodemailer");
 const rateLimit = require("express-rate-limit");
 const { z } = require("zod");
 const jwt = require("jsonwebtoken");
@@ -160,22 +159,13 @@ app.use("/uploads", express.static(uploadsDir));
 // ---------------------------------------------------------------------------
 // Mail
 // ---------------------------------------------------------------------------
-const smtpPort = Number(process.env.SMTP_PORT) || 587;
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: smtpPort,
-  secure: smtpPort === 465,
-  family: 4, // force IPv4
-  auth: process.env.SMTP_USER
-    ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-    : undefined,
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
-  dnsLookup: (hostname, options, callback) => {
-    require('dns').lookup(hostname, { family: 4 }, callback); // Forces DNS to return IPv4 addresses only
-  }
-});
+// Resend doesn't throw on failure, it returns { error }, so we throw ourselves.
+async function sendMail({ to, subject, text, html }) {
+  const { error } = await resend.emails.send({ from: MAIL_FROM(), to, subject, text, html });
+  if (error) throw new Error(error.message);
+}
 
 const MAIL_FROM = () => process.env.SMTP_FROM || "no-reply@vellocity3d.com";
 
@@ -187,11 +177,11 @@ async function sendCodeEmail(toEmail, code) {
   if (!IS_PROD) {
     console.log(`[2FA] Verification code for ${toEmail}: ${code}`); // local testing only
   }
-  if (!process.env.SMTP_HOST) {
+  if (!process.env.RESEND_API_KEY) {
     if (IS_PROD) throw new Error("SMTP_HOST is not configured");
     return; // no SMTP configured yet — console log is enough for local dev
   }
-  await transporter.sendMail({
+  await sendMail({
     from: MAIL_FROM(),
     to: toEmail,
     subject: "Your Vellocity3D verification code",
@@ -202,7 +192,7 @@ async function sendCodeEmail(toEmail, code) {
 async function sendVerificationEmail(toEmail, token) {
   const verifyUrl = `${APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
 
-  await transporter.sendMail({
+  await sendMail({
     from: MAIL_FROM(),
     to: toEmail,
     subject: "Verify your Vellocity3D account",
@@ -313,7 +303,7 @@ Total: ${money(order.total)}
 // Never throws — a failed email must not make the admin action fail.
 async function sendOrderStatusEmail(orderId, kind) {
   try {
-    if (!process.env.SMTP_HOST) return; // no SMTP configured yet
+    if (!process.env.RESEND_API_KEY) return; // no SMTP configured yet
 
     const order = db
       .prepare(
@@ -332,7 +322,7 @@ async function sendOrderStatusEmail(orderId, kind) {
       username: order.username,
     });
 
-    await transporter.sendMail({ from: MAIL_FROM(), to: order.email, subject, text, html });
+    await sendMail({ from: MAIL_FROM(), to: order.email, subject, text, html });
   } catch (err) {
     console.error(`Failed to send "${kind}" email for order ${orderId}:`, err.message);
   }
@@ -614,7 +604,7 @@ app.post("/api/auth/register", registerLimiter, async (req, res) => {
     console.error("APP_URL is missing");
     return res.status(500).json({ error: "Server email configuration is incomplete." });
   }
-  if (!process.env.SMTP_HOST) {
+  if (!process.env.RESEND_API_KEY) {
     console.error("SMTP_HOST is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }
@@ -694,7 +684,7 @@ app.post("/api/auth/resend-verification", registerLimiter, async (req, res) => {
     return res.json({ message: "That email is already verified. You can log in." });
   }
 
-  if (!APP_URL || !process.env.SMTP_HOST) {
+  if (!APP_URL || !process.env.RESEND_API_KEY) {
     console.error("APP_URL or SMTP_HOST is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }

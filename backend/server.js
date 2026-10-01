@@ -160,7 +160,7 @@ app.use("/uploads", express.static(uploadsDir));
 // ---------------------------------------------------------------------------
 // Mail
 // ---------------------------------------------------------------------------
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_KEY);
 
 // Resend doesn't throw on failure, it returns { error }, so we throw ourselves.
 async function sendMail({ to, subject, text, html }) {
@@ -178,7 +178,7 @@ async function sendCodeEmail(toEmail, code) {
   if (!IS_PROD) {
     console.log(`[2FA] Verification code for ${toEmail}: ${code}`); // local testing only
   }
-  if (!process.env.RESEND_API_KEY) {
+  if (!process.env.RESEND_KEY) {
     if (IS_PROD) throw new Error("SMTP_HOST is not configured");
     return; // no SMTP configured yet — console log is enough for local dev
   }
@@ -304,7 +304,7 @@ Total: ${money(order.total)}
 // Never throws — a failed email must not make the admin action fail.
 async function sendOrderStatusEmail(orderId, kind) {
   try {
-    if (!process.env.RESEND_API_KEY) return; // no SMTP configured yet
+    if (!process.env.RESEND_KEY) return; // no SMTP configured yet
 
     const order = db
       .prepare(
@@ -605,7 +605,7 @@ app.post("/api/auth/register", registerLimiter, async (req, res) => {
     console.error("APP_URL is missing");
     return res.status(500).json({ error: "Server email configuration is incomplete." });
   }
-  if (!process.env.RESEND_API_KEY) {
+  if (!process.env.RESEND_KEY) {
     console.error("SMTP_HOST is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }
@@ -685,7 +685,7 @@ app.post("/api/auth/resend-verification", registerLimiter, async (req, res) => {
     return res.json({ message: "That email is already verified. You can log in." });
   }
 
-  if (!APP_URL || !process.env.RESEND_API_KEY) {
+  if (!APP_URL || !process.env.RESEND_KEY) {
     console.error("APP_URL or SMTP_HOST is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }

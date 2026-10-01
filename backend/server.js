@@ -160,15 +160,25 @@ app.use("/uploads", express.static(uploadsDir));
 // ---------------------------------------------------------------------------
 // Mail
 // ---------------------------------------------------------------------------
-const resend = new Resend(process.env.RESEND_KEY);
-
-// Resend doesn't throw on failure, it returns { error }, so we throw ourselves.
 async function sendMail({ to, subject, text, html }) {
-  const { error } = await resend.emails.send({ from: MAIL_FROM(), to, subject, text, html });
-  if (error) throw new Error(error.message);
+  const resp = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "api-key": process.env.BREVO_KEY,
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({
+      sender: { name: "Vellocity3D", email: process.env.BREVO_SENDER_EMAIL },
+      to: [{ email: to }],
+      subject,
+      textContent: text,
+      htmlContent: html,
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!resp.ok) throw new Error(`Brevo ${resp.status}: ${await resp.text()}`);
 }
-
-const MAIL_FROM = () => process.env.SMTP_FROM || "no-reply@vellocity3d.com";
 
 function generateCode() {
   return String(crypto.randomInt(100000, 1000000)); // 6 digits, cryptographically secure
@@ -178,12 +188,11 @@ async function sendCodeEmail(toEmail, code) {
   if (!IS_PROD) {
     console.log(`[2FA] Verification code for ${toEmail}: ${code}`); // local testing only
   }
-  if (!process.env.RESEND_KEY) {
+  if (!process.env.BREVO_KEY) {
     if (IS_PROD) throw new Error("SMTP_HOST is not configured");
     return; // no SMTP configured yet — console log is enough for local dev
   }
   await sendMail({
-    from: MAIL_FROM(),
     to: toEmail,
     subject: "Your Vellocity3D verification code",
     text: `Your verification code is ${code}. It expires in 5 minutes.`,
@@ -194,7 +203,6 @@ async function sendVerificationEmail(toEmail, token) {
   const verifyUrl = `${APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
 
   await sendMail({
-    from: MAIL_FROM(),
     to: toEmail,
     subject: "Verify your Vellocity3D account",
     text: `
@@ -304,7 +312,7 @@ Total: ${money(order.total)}
 // Never throws — a failed email must not make the admin action fail.
 async function sendOrderStatusEmail(orderId, kind) {
   try {
-    if (!process.env.RESEND_KEY) return; // no SMTP configured yet
+    if (!process.env.BREVO_KEY) return; // no SMTP configured yet
 
     const order = db
       .prepare(
@@ -323,7 +331,7 @@ async function sendOrderStatusEmail(orderId, kind) {
       username: order.username,
     });
 
-    await sendMail({ from: MAIL_FROM(), to: order.email, subject, text, html });
+    await sendMail({order.email, subject, text, html });
   } catch (err) {
     console.error(`Failed to send "${kind}" email for order ${orderId}:`, err.message);
   }
@@ -605,7 +613,7 @@ app.post("/api/auth/register", registerLimiter, async (req, res) => {
     console.error("APP_URL is missing");
     return res.status(500).json({ error: "Server email configuration is incomplete." });
   }
-  if (!process.env.RESEND_KEY) {
+  if (!process.env.BREVO_KEY) {
     console.error("SMTP_HOST is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }
@@ -685,7 +693,7 @@ app.post("/api/auth/resend-verification", registerLimiter, async (req, res) => {
     return res.json({ message: "That email is already verified. You can log in." });
   }
 
-  if (!APP_URL || !process.env.RESEND_KEY) {
+  if (!APP_URL || !process.env.BREVO_KEY) {
     console.error("APP_URL or SMTP_HOST is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }

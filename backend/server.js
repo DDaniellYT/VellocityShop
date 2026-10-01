@@ -331,7 +331,7 @@ async function sendOrderStatusEmail(orderId, kind) {
       username: order.username,
     });
 
-    await sendMail({order.email, subject, text, html });
+    await sendMail({to: order.email, subject, text, html });
   } catch (err) {
     console.error(`Failed to send "${kind}" email for order ${orderId}:`, err.message);
   }

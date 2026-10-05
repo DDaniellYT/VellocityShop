@@ -29,7 +29,6 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const db = require("./db");
-const { Resend } = require("resend");
 
 const app = express();
 
@@ -90,8 +89,31 @@ function ensureDir(dir) {
 
 const uploadsDir = path.join(DATA_DIR, "uploads");
 const carouselDir = path.join(DATA_DIR, "carousel");
+const productsDir = path.join(DATA_DIR, "Products"); // one sub-folder per product
+const tmpUploadsDir = path.join(DATA_DIR, ".tmp-uploads"); // staging area for product images
 ensureDir(uploadsDir);
 ensureDir(carouselDir);
+ensureDir(productsDir);
+ensureDir(tmpUploadsDir);
+
+const MAX_IMAGES = 20; // per product
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB per image
+const PLACEHOLDER_IMAGE = "https://placehold.co/400x400?text=No+Image";
+const MIME_TO_EXT = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+
+function imageFileFilter(req, file, cb) {
+  const allowed = /^\.(jpeg|jpg|png|webp|gif)$/;
+  const ok = allowed.test(path.extname(file.originalname).toLowerCase());
+  if (ok) return cb(null, true);
+  const err = new Error("Only image files are allowed");
+  err.status = 400;
+  cb(err, false);
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
@@ -104,16 +126,115 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) => {
-    const allowed = /^\.(jpeg|jpg|png|webp|gif)$/;
-    const ok = allowed.test(path.extname(file.originalname).toLowerCase());
-    if (ok) return cb(null, true);
-    const err = new Error("Only image files are allowed");
-    err.status = 400;
-    cb(err, false);
-  },
+  limits: { fileSize: MAX_IMAGE_BYTES },
+  fileFilter: imageFileFilter,
 });
+
+// Product images are first staged in a temporary folder, checked, and only then
+// moved into Products/<product folder>/ under their final numbered names.
+const uploadProductImages = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, tmpUploadsDir),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      cb(null, `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${ext}`);
+    },
+  }),
+  limits: { fileSize: MAX_IMAGE_BYTES, files: MAX_IMAGES },
+  fileFilter: imageFileFilter,
+});
+
+// ---------------------------------------------------------------------------
+// Product image folders
+//
+//   <DATA_DIR>/Products/<product name>/1.jpg, 2.png, 3.webp ...
+//
+// The numbers are the display order (1 = cover image). The folder name comes
+// from the product name (made safe for the file system) and is stored in
+// products.folder, so renaming a product renames its folder.
+// ---------------------------------------------------------------------------
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+function sanitizeFolderName(name, fallback) {
+  let s = String(name || "")
+    .normalize("NFC")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+/, "")
+    .replace(/[. ]+$/, "");
+  if (s.length > 100) s = s.slice(0, 100).trim().replace(/[. ]+$/, "");
+  if (!s) return fallback;
+  if (WINDOWS_RESERVED.test(s)) s = `${s}_`;
+  return s;
+}
+
+function isFolderTaken(candidate, ownerId) {
+  const lower = candidate.toLowerCase();
+
+  const other = db
+    .prepare("SELECT id FROM products WHERE lower(folder) = ? AND id != ?")
+    .get(lower, ownerId == null ? -1 : ownerId);
+  if (other) return true;
+
+  const own =
+    ownerId == null ? null : db.prepare("SELECT folder FROM products WHERE id = ?").get(ownerId);
+  const ownsIt = own && own.folder && own.folder.toLowerCase() === lower;
+
+  // A folder that already exists on disk but belongs to nobody is not touched.
+  if (!ownsIt && fs.existsSync(path.join(productsDir, candidate))) return true;
+  return false;
+}
+
+// Folder name for a product: its name, plus " (2)", " (3)"... if that name is taken.
+function pickFolderName(name, ownerId) {
+  const base = sanitizeFolderName(name, ownerId == null ? "product" : `product-${ownerId}`);
+  let candidate = base;
+  let n = 2;
+  while (isFolderTaken(candidate, ownerId)) {
+    candidate = `${base} (${n++})`;
+  }
+  return candidate;
+}
+
+// Image file names in a product folder, sorted by their number (1, 2, 3, ...).
+function listProductImageFiles(folder) {
+  if (!folder) return [];
+  let files = [];
+  try {
+    files = fs.readdirSync(path.join(productsDir, folder));
+  } catch {
+    return [];
+  }
+  return files
+    .filter((f) => /^\d+\.(jpe?g|png|webp|gif)$/i.test(f))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+}
+
+const imageUrl = (folder, file) => `/Products/${encodeURIComponent(folder)}/${file}`;
+
+// Adds `images` (ordered URL list) to a product row and keeps `image` = cover image.
+function withImages(product) {
+  const images = listProductImageFiles(product.folder).map((f) => imageUrl(product.folder, f));
+  return { ...product, images, image: images[0] || product.image };
+}
+
+// Keeps products.image pointing at image number 1 (or the placeholder).
+function syncCoverImage(productId, folder) {
+  const files = listProductImageFiles(folder);
+  const cover = files[0] ? imageUrl(folder, files[0]) : PLACEHOLDER_IMAGE;
+  db.prepare("UPDATE products SET image = ? WHERE id = ?").run(cover, productId);
+}
+
+function moveFile(src, dest) {
+  try {
+    fs.renameSync(src, dest);
+  } catch (err) {
+    if (err.code !== "EXDEV") throw err;
+    fs.copyFileSync(src, dest);
+    fs.unlinkSync(src);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // DB migration: extra columns (safe to run on every start)
@@ -129,6 +250,35 @@ ensureColumn("orders", "stripe_session_id", "TEXT");
 ensureColumn("orders", "paid_at", "TEXT");
 ensureColumn("orders", "shipping_json", "TEXT"); // name/address/phone collected by Stripe
 ensureColumn("two_factor_codes", "attempts", "INTEGER DEFAULT 0");
+
+// One-time migration: give every existing product a folder, and copy its old
+// single image (from /uploads) into that folder as image number 1.
+function migrateProductFolders() {
+  const rows = db.prepare("SELECT * FROM products WHERE folder IS NULL OR folder = ''").all();
+  for (const p of rows) {
+    const folder = pickFolderName(p.name, p.id);
+    db.prepare("UPDATE products SET folder = ? WHERE id = ?").run(folder, p.id);
+
+    if (p.image && p.image.startsWith("/uploads/")) {
+      const src = path.join(uploadsDir, path.basename(p.image));
+      const ext = path.extname(src).toLowerCase();
+      if (/^\.(jpe?g|png|webp|gif)$/.test(ext) && fs.existsSync(src)) {
+        try {
+          const dir = path.join(productsDir, folder);
+          fs.mkdirSync(dir, { recursive: true });
+          fs.copyFileSync(src, path.join(dir, `1${ext}`));
+          db.prepare("UPDATE products SET image = ? WHERE id = ?").run(
+            imageUrl(folder, `1${ext}`),
+            p.id
+          );
+        } catch (err) {
+          console.error(`Could not move the image of product ${p.id} into its folder:`, err.message);
+        }
+      }
+    }
+  }
+}
+migrateProductFolders();
 
 // ---------------------------------------------------------------------------
 // Core middleware
@@ -149,13 +299,23 @@ app.use(
   })
 );
 
-app.use(cors({ 
-  origin: "https://vellocity3d.vercel.app", 
-  credentials: true
-}));
+const allowedOrigins = [
+  "https://vellocity3d.vercel.app",
+  ...(process.env.NODE_ENV !== "production" ? ["http://localhost:5173"] : []),
+  ...(process.env.NODE_ENV !== "production" ? ["http://10.123.22.253:5173"] : []),
+];
+
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 app.use("/carousel", express.static(carouselDir));
 app.use("/uploads", express.static(uploadsDir));
+// Image numbers get re-used when images are reordered, so browsers must re-check them.
+app.use(
+  "/Products",
+  express.static(productsDir, {
+    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+  })
+);
 
 // ---------------------------------------------------------------------------
 // Mail
@@ -1127,6 +1287,8 @@ app.patch("/api/orders/:id/awb", requireAdmin, (req, res) => {
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
+// Images are not part of this schema: they are managed through
+// PUT /api/products/:id/images and live in Products/<folder>/.
 const productSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
@@ -1135,7 +1297,6 @@ const productSchema = z.object({
   price: z.number().nonnegative().max(1000000),
   category: z.string().max(100).optional(),
   stock: z.number().int().nonnegative().optional(),
-  image: z.string().max(500).optional(),
 });
 
 // CREATE
@@ -1150,14 +1311,14 @@ app.post("/api/products", requireAdmin, (req, res) => {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
 
-  const { name, description, long_description, specs, price, category, stock, image } = parsed.data;
+  const { name, description, long_description, specs, price, category, stock } = parsed.data;
 
   const maxPos = db.prepare("SELECT MAX(position) AS maxPos FROM products").get().maxPos;
   const nextPosition = maxPos === null ? 0 : maxPos + 1;
 
   const insert = db.prepare(`
-    INSERT INTO products (name, description, long_description, specs, price, category, stock, image, position)
-    VALUES (@name, @description, @long_description, @specs, @price, @category, @stock, @image, @position)
+    INSERT INTO products (name, description, long_description, specs, price, category, stock, image, position, folder)
+    VALUES (@name, @description, @long_description, @specs, @price, @category, @stock, @image, @position, @folder)
   `);
 
   const result = insert.run({
@@ -1168,13 +1329,14 @@ app.post("/api/products", requireAdmin, (req, res) => {
     category: category || "Uncategorized",
     price,
     stock: stock !== undefined ? stock : 0,
-    image: image || "https://placehold.co/400x400?text=No+Image",
+    image: PLACEHOLDER_IMAGE,
     position: nextPosition,
+    folder: pickFolderName(name, null), // the folder itself is created with the first image
   });
 
   const newProduct = db.prepare("SELECT * FROM products WHERE id = ?").get(result.lastInsertRowid);
 
-  res.status(201).json(newProduct);
+  res.status(201).json(withImages(newProduct));
 });
 
 // REORDER (bulk — used by drag-and-drop)
@@ -1191,20 +1353,20 @@ app.post("/api/products/reorder", requireAdmin, (req, res) => {
   reorder(ids);
 
   const allProducts = db.prepare("SELECT * FROM products ORDER BY position ASC, id ASC").all();
-  res.json(allProducts);
+  res.json(allProducts.map(withImages));
 });
 
 // READ (all)
 app.get("/api/products", (req, res) => {
   const allProducts = db.prepare("SELECT * FROM products ORDER BY position ASC, id ASC").all();
-  res.json(allProducts);
+  res.json(allProducts.map(withImages));
 });
 
 // READ (one)
 app.get("/api/products/:id", (req, res) => {
   const product = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
   if (!product) return res.status(404).json({ error: "Product not found" });
-  res.json(product);
+  res.json(withImages(product));
 });
 
 // UPDATE
@@ -1222,7 +1384,23 @@ app.put("/api/products/:id", requireAdmin, (req, res) => {
     return res.status(400).json({ error: parsed.error.issues[0].message });
   }
 
-  const { name, description, long_description, specs, price, category, stock, image } = parsed.data;
+  const { name, description, long_description, specs, price, category, stock } = parsed.data;
+
+  // Renaming a product renames its image folder too.
+  let folder = existing.folder;
+  let image = existing.image;
+  if (name !== undefined && name !== existing.name) {
+    const newFolder = pickFolderName(name, existing.id);
+    if (newFolder !== existing.folder) {
+      if (existing.folder) {
+        const oldDir = path.join(productsDir, existing.folder);
+        if (fs.existsSync(oldDir)) fs.renameSync(oldDir, path.join(productsDir, newFolder));
+      }
+      folder = newFolder;
+      const files = listProductImageFiles(folder);
+      if (files[0]) image = imageUrl(folder, files[0]);
+    }
+  }
 
   const updated = {
     name: name !== undefined ? name : existing.name,
@@ -1232,19 +1410,136 @@ app.put("/api/products/:id", requireAdmin, (req, res) => {
     price: price !== undefined ? price : existing.price,
     category: category !== undefined ? category : existing.category,
     stock: stock !== undefined ? stock : existing.stock,
-    image: image !== undefined ? image : existing.image,
+    image,
+    folder,
   };
 
   db.prepare(
     `UPDATE products
      SET name = @name, description = @description, long_description = @long_description,
-         specs = @specs, price = @price, category = @category, stock = @stock, image = @image
+         specs = @specs, price = @price, category = @category, stock = @stock,
+         image = @image, folder = @folder
      WHERE id = @id`
   ).run({ ...updated, id: req.params.id });
 
   const result = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
-  res.json(result);
+  res.json(withImages(result));
 });
+
+// IMAGES — add, delete and reorder/rename a product's images in one request.
+//
+// multipart/form-data:
+//   images  one or more NEW image files (optional)
+//   layout  JSON list describing the final result, in display order. Each entry is
+//           { "file": "2.jpg" }  -> keep this existing image
+//           { "new": 0 }         -> use the uploaded file at that position of `images`
+//
+// Existing images missing from `layout` are deleted. The final images are saved as
+// 1.ext, 2.ext, 3.ext ... in Products/<folder>/ following the order of `layout`.
+app.put(
+  "/api/products/:id/images",
+  requireAdmin,
+  uploadProductImages.array("images", MAX_IMAGES),
+  async (req, res) => {
+    const uploaded = req.files || [];
+
+    try {
+      const product = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
+      if (!product) return res.status(404).json({ error: "Product not found" });
+
+      if (typeof req.body.layout !== "string") {
+        return res.status(400).json({ error: "layout is required" });
+      }
+      let layout;
+      try {
+        layout = JSON.parse(req.body.layout);
+      } catch {
+        return res.status(400).json({ error: "layout must be valid JSON" });
+      }
+      if (!Array.isArray(layout) || layout.length > MAX_IMAGES) {
+        return res
+          .status(400)
+          .json({ error: `A product can have at most ${MAX_IMAGES} images` });
+      }
+
+      // Check what was really uploaded (by content, not by file name).
+      const { fileTypeFromFile } = await import("file-type");
+      const newExts = [];
+      for (const f of uploaded) {
+        const type = await fileTypeFromFile(f.path);
+        if (!type || !MIME_TO_EXT[type.mime]) {
+          return res.status(400).json({ error: `"${f.originalname}" is not a valid image` });
+        }
+        newExts.push(MIME_TO_EXT[type.mime]);
+      }
+
+      let folder = product.folder;
+      if (!folder) {
+        folder = pickFolderName(product.name, product.id);
+        db.prepare("UPDATE products SET folder = ? WHERE id = ?").run(folder, product.id);
+      }
+      const dir = path.join(productsDir, folder);
+
+      // Validate the layout against what exists / was uploaded.
+      const existingFiles = listProductImageFiles(folder);
+      const keptExisting = new Set();
+      const usedNew = new Set();
+      for (const entry of layout) {
+        if (entry && typeof entry.file === "string") {
+          if (!existingFiles.includes(entry.file) || keptExisting.has(entry.file)) {
+            return res.status(400).json({ error: "layout refers to an unknown image" });
+          }
+          keptExisting.add(entry.file);
+        } else if (entry && Number.isInteger(entry.new)) {
+          if (entry.new < 0 || entry.new >= uploaded.length || usedNew.has(entry.new)) {
+            return res.status(400).json({ error: "layout refers to an unknown upload" });
+          }
+          usedNew.add(entry.new);
+        } else {
+          return res.status(400).json({ error: "layout contains an invalid entry" });
+        }
+      }
+
+      fs.mkdirSync(dir, { recursive: true });
+
+      const plan = layout.map((entry) =>
+        typeof entry.file === "string"
+          ? { existing: true, src: path.join(dir, entry.file), ext: path.extname(entry.file).toLowerCase() }
+          : { existing: false, src: uploaded[entry.new].path, ext: newExts[entry.new] }
+      );
+
+      // 1) Delete the images that were removed.
+      for (const f of existingFiles) {
+        if (!keptExisting.has(f)) fs.unlinkSync(path.join(dir, f));
+      }
+
+      // 2) Park the kept images under temporary names so renumbering can't collide.
+      plan.forEach((p, i) => {
+        if (p.existing) {
+          const tmp = path.join(dir, `.tmp-${i}${p.ext}`);
+          fs.renameSync(p.src, tmp);
+          p.src = tmp;
+        }
+      });
+
+      // 3) Give every image its final number: 1, 2, 3, ...
+      const now = new Date();
+      plan.forEach((p, i) => {
+        const dest = path.join(dir, `${i + 1}${p.ext}`);
+        moveFile(p.src, dest);
+        fs.utimesSync(dest, now, now); // new timestamp so browsers drop any cached copy
+      });
+
+      syncCoverImage(product.id, folder);
+
+      const updated = db.prepare("SELECT * FROM products WHERE id = ?").get(product.id);
+      res.json(withImages(updated));
+    } finally {
+      // Remove whatever is left of the staged uploads (moved files are already gone).
+      uploaded.forEach((f) => fs.unlink(f.path, () => {}));
+    }
+  }
+);
 
 // MOVE (reorder by one position, left or right)
 app.post("/api/products/:id/move", requireAdmin, (req, res) => {
@@ -1274,7 +1569,7 @@ app.post("/api/products/:id/move", requireAdmin, (req, res) => {
   // if no neighbor, the product is already at that edge — nothing to swap, just return current order
 
   const allProducts = db.prepare("SELECT * FROM products ORDER BY position ASC, id ASC").all();
-  res.json(allProducts);
+  res.json(allProducts.map(withImages));
 });
 
 // DELETE
@@ -1284,7 +1579,18 @@ app.delete("/api/products/:id", requireAdmin, (req, res) => {
 
   db.prepare("DELETE FROM products WHERE id = ?").run(req.params.id);
 
-  // Clean up the image file on disk, if it was one we uploaded ourselves.
+  // Remove the product's whole image folder.
+  if (product.folder) {
+    const root = path.resolve(productsDir);
+    const dir = path.resolve(productsDir, product.folder);
+    if (dir.startsWith(root + path.sep)) {
+      fs.rm(dir, { recursive: true, force: true }, (err) => {
+        if (err) console.error("Failed to delete image folder:", dir, err.message);
+      });
+    }
+  }
+
+  // Clean up the old single image file on disk, if it was one we uploaded ourselves.
   if (product.image && product.image.startsWith("/uploads/")) {
     const filePath = path.join(uploadsDir, path.basename(product.image));
     fs.unlink(filePath, (err) => {
@@ -1294,7 +1600,7 @@ app.delete("/api/products/:id", requireAdmin, (req, res) => {
     });
   }
 
-  res.json({ message: "Product deleted", product });
+  res.json({ message: "Product deleted", product: withImages(product) });
 });
 
 // ---------------------------------------------------------------------------
@@ -1310,7 +1616,7 @@ const distDir = process.env.FRONTEND_DIST || path.join(__dirname, "..", "fronten
 if (fs.existsSync(path.join(distDir, "index.html"))) {
   app.use(express.static(distDir));
   // SPA fallback so client-side routes like /verify-email?token=... load index.html.
-  app.get(/^\/(?!api\/|uploads\/|carousel\/).*/, (req, res) => {
+  app.get(/^\/(?!api\/|uploads\/|carousel\/|Products\/).*/, (req, res) => {
     res.sendFile(path.join(distDir, "index.html"));
   });
 } else {
@@ -1331,6 +1637,9 @@ app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     err.status = 400;
     if (err.code === "LIMIT_FILE_SIZE") err.message = "Image is too large (max 10MB)";
+    if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+      err.message = `Too many images (max ${MAX_IMAGES})`;
+    }
   }
   // Malformed JSON body
   if (err.type === "entity.parse.failed") {

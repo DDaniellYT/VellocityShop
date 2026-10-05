@@ -175,7 +175,10 @@ a {
 @media (max-width: 900px) {
   .hero {
     min-height: 70vh;
-    padding: 90px 20vw 60px;
+    padding: 90px 0 60px;
+  }
+  .container {
+    padding: 0 20px;
   }
 }
 .hero-bg {
@@ -185,7 +188,7 @@ a {
     linear-gradient(0deg, rgba(11, 5, 20, 0.4), rgba(11, 5, 20, 0.4)),
     linear-gradient(90deg, rgba(11, 5, 20, 0.4) 0%, rgba(5, 1, 33, 0.4) 45%, rgba(11, 5, 20, 0.486) 100%),
     radial-gradient(circle at 90% 70%, rgba(12, 192, 223, 0.15), transparent 50%),
-    url("/hero.png") center / 100% 140% no-repeat;
+    url("/hero.png") center / cover no-repeat;
   z-index: 0;
 }
 
@@ -496,6 +499,10 @@ a {
 }
 
 @media (max-width: 720px) {
+  .hero-bg {
+    background-position: center, center, center, 93% center; /* 70% = shows more of the right side */
+  }
+  
   .product-detail {
     flex-direction: column;
   }
@@ -1162,6 +1169,9 @@ a {
   .navbar-inner {
     padding: 12px 20px;
   }
+  .navbar-inner .nav-links {
+  margin-right: 0;
+  }
 
   .mobile-menu-btn {
     display: flex;
@@ -1226,11 +1236,24 @@ a {
   .product-detail-info h1 {
     font-size: 1.5rem;
   }
+
+  .qty-stepper button {
+    width: 34px;
+    height: 34px;
+  }
+  .carousel-dot {
+    width: 11px;
+    height: 11px;
+  }
+  .carousel-dot.active {
+    width: 24px;
+  }
 }
 
 @media (max-width: 480px) {
   .modal {
     padding: 20px;
+    max-height: 90dvh;
   }
 
   .cart-table {

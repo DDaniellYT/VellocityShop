@@ -22,6 +22,7 @@ import {
   deleteProduct,
   moveProduct,
   reorderProducts,
+  syncProductImages,
   getAllOrders,
   updateOrderStatus,
   updateOrderAwb,
@@ -126,17 +127,36 @@ export default function AdminPage() {
     setEditingProduct(null);
   };
 
-  const handleSubmit = async (form) => {
+  // The product's text fields are saved first, then its images
+  // (new files, deleted images and the new order) in a second request.
+  const handleSubmit = async (form, imagePayload) => {
     setSaving(true);
     setError("");
     try {
+      let saved;
       if (editingProduct) {
-        await updateProduct(editingProduct.id, form);
+        const res = await updateProduct(editingProduct.id, form);
+        saved = res.data;
       } else {
-        await createProduct(form);
+        const res = await createProduct(form);
+        saved = res.data;
       }
+
+      let imageError = "";
+      if (imagePayload?.changed) {
+        try {
+          await syncProductImages(saved.id, imagePayload.layout, imagePayload.files);
+        } catch (imgErr) {
+          if (imgErr?.response?.status === 401) throw imgErr;
+          imageError = imgErr?.response?.data?.error || "Please try again.";
+        }
+      }
+
       await loadProducts();
       closeForm();
+      if (imageError) {
+        setError(`The product was saved, but its images weren't: ${imageError}`);
+      }
     } catch (err) {
       if (err?.response?.status === 401) {
         setError("Your session expired. Please log in again.");

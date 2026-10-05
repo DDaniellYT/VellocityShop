@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import Navbar from "../components/Navbar.jsx";
 import Footer from "../components/Footer.jsx";
-import { getProduct } from "../api.js";
+import { getProduct, API_ORIGIN } from "../api.js";
 import { useCart } from "../CartContext.jsx";
-import { API_ORIGIN } from "../api.js";
+
+const toSrc = (url) => (url?.startsWith("http") ? url : `${API_ORIGIN}${url}`);
 
 export default function ProductDetailPage() {
   const { id } = useParams();
@@ -14,6 +15,7 @@ export default function ProductDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [qty, setQty] = useState(1);
+  const [activeImage, setActiveImage] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -26,6 +28,7 @@ export default function ProductDetailPage() {
 
   useEffect(() => {
     setQty(1);
+    setActiveImage(0);
   }, [id]);
 
   const decreaseQty = () => setQty((q) => Math.max(1, q - 1));
@@ -39,6 +42,12 @@ export default function ProductDetailPage() {
     if (Number.isNaN(val)) return;
     setQty(Math.min(Math.max(1, val), product.stock || 1));
   };
+
+  // Images in their numbered order (1, 2, 3, ...); falls back to the single cover image.
+  const images = product
+    ? (product.images?.length ? product.images : [product.image]).filter(Boolean)
+    : [];
+  const shownImage = images[Math.min(activeImage, images.length - 1)];
 
   return (
     <>
@@ -60,13 +69,47 @@ export default function ProductDetailPage() {
             <div className="product-detail-media">
               <img
                 className="product-detail-image"
-                src={
-                  product.image?.startsWith("http")
-                    ? product.image
-                    : `${API_ORIGIN}${product.image}`
-                }
+                src={toSrc(shownImage)}
                 alt={product.name}
               />
+              {images.length > 1 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  {images.map((url, i) => (
+                    <button
+                      key={url}
+                      type="button"
+                      onClick={() => setActiveImage(i)}
+                      aria-label={`Show image ${i + 1} of ${images.length}`}
+                      aria-current={i === activeImage ? "true" : undefined}
+                      style={{
+                        width: 72,
+                        height: 72,
+                        padding: 0,
+                        overflow: "hidden",
+                        borderRadius: 10,
+                        background: "var(--bg-card)",
+                        cursor: "pointer",
+                        border:
+                          i === activeImage
+                            ? "2px solid var(--accent)"
+                            : "1px solid var(--border)",
+                        opacity: i === activeImage ? 1 : 0.75,
+                      }}
+                    >
+                      <img
+                        src={toSrc(url)}
+                        alt=""
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          display: "block",
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
               {product.specs?.trim() && (
                 <div className="product-detail-specs">
                   {product.specs}

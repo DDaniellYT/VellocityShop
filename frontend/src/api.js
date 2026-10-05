@@ -1,6 +1,7 @@
 import axios from "axios";
 
-export const API_ORIGIN = "https://vellocityshop-production.up.railway.app" || "";
+// export const API_ORIGIN = "https://vellocityshop-production.up.railway.app" || "";
+export const API_ORIGIN = "http://10.123.22.253:5000";
 
 const API_BASE_URL = `${API_ORIGIN}/api`;
 
@@ -76,6 +77,21 @@ export const uploadImage = (file) => {
   formData.append("image", file);
 
   return client.post("/upload", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+};
+
+// Saves a product's images in one request: new files, deleted images and the new order.
+// layout: [{ file: "2.jpg" }  -> keep existing image 2,
+//          { new: 0 }         -> use files[0] ...] in the final display order.
+export const syncProductImages = (id, layout, files = []) => {
+  const formData = new FormData();
+  formData.append("layout", JSON.stringify(layout));
+  files.forEach((file) => formData.append("images", file));
+
+  return client.put(`/products/${id}/images`, formData, {
     headers: {
       "Content-Type": "multipart/form-data",
     },

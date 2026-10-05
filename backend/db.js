@@ -145,6 +145,19 @@ addColumnIfMissing(
   "INTEGER"
 );
 
+// Folder (inside Products/) that holds this product's numbered images.
+addColumnIfMissing(
+  "products",
+  "folder",
+  "TEXT"
+);
+
+// Two products can never share a folder (compared without regard to case).
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_products_folder
+  ON products(folder COLLATE NOCASE)
+`);
+
 // Backfill NULL positions using current ID order.
 const needsBackfill = db
   .prepare(

@@ -14,6 +14,8 @@ import {
 } from "@dnd-kit/sortable";
 import SortableProductCard from "../components/SortableProductCard.jsx";
 import ProductForm from "../components/ProductForm.jsx";
+import WorkCard from "../components/WorkCard.jsx";
+import WorkForm from "../components/WorkForm.jsx";
 import { useAuth } from "../AuthContext.jsx";
 import {
   getProducts,
@@ -23,6 +25,11 @@ import {
   moveProduct,
   reorderProducts,
   syncProductImages,
+  getWork,
+  createWork,
+  updateWork,
+  deleteWork,
+  syncWorkImages,
   getAllOrders,
   updateOrderStatus,
   updateOrderAwb,
@@ -33,6 +40,7 @@ export default function AdminPage() {
   const { user, logout } = useAuth();
 
   const [view, setView] = useState("shop"); // "shop" | "orders"
+  const [shopTab, setShopTab] = useState("products"); // "products" | "work"
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -40,6 +48,13 @@ export default function AdminPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  const [workItems, setWorkItems] = useState([]);
+  const [workLoading, setWorkLoading] = useState(true);
+  const [workError, setWorkError] = useState("");
+  const [showWorkForm, setShowWorkForm] = useState(false);
+  const [editingWork, setEditingWork] = useState(null);
+  const [savingWork, setSavingWork] = useState(false);
 
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
@@ -73,6 +88,19 @@ export default function AdminPage() {
     }
   };
 
+  const loadWork = async () => {
+    setWorkLoading(true);
+    setWorkError("");
+    try {
+      const res = await getWork();
+      setWorkItems(res.data);
+    } catch {
+      setWorkError("Couldn't load the work items.");
+    } finally {
+      setWorkLoading(false);
+    }
+  };
+
   const loadOrders = async () => {
     setOrdersLoading(true);
     setOrdersError("");
@@ -100,7 +128,10 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    if (user?.role === "admin") loadProducts();
+    if (user?.role === "admin") {
+      loadProducts();
+      loadWork();
+    }
   }, [user]);
 
   useEffect(() => {
@@ -112,6 +143,9 @@ export default function AdminPage() {
     navigate("/");
   };
 
+  // ---------------------------------------------------------------------------
+  // Products
+  // ---------------------------------------------------------------------------
   const openAddForm = () => {
     setEditingProduct(null);
     setShowForm(true);
@@ -224,6 +258,85 @@ export default function AdminPage() {
       }
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // Work items
+  // ---------------------------------------------------------------------------
+  const openAddWorkForm = () => {
+    setEditingWork(null);
+    setShowWorkForm(true);
+  };
+
+  const openEditWorkForm = (item) => {
+    setEditingWork(item);
+    setShowWorkForm(true);
+  };
+
+  const closeWorkForm = () => {
+    setShowWorkForm(false);
+    setEditingWork(null);
+  };
+
+  // Text + details are saved first, then the images in a second request.
+  const handleWorkSubmit = async (form, imagePayload) => {
+    setSavingWork(true);
+    setWorkError("");
+    try {
+      let saved;
+      if (editingWork) {
+        const res = await updateWork(editingWork.id, form);
+        saved = res.data;
+      } else {
+        const res = await createWork(form);
+        saved = res.data;
+      }
+
+      let imageError = "";
+      if (imagePayload?.changed) {
+        try {
+          await syncWorkImages(saved.id, imagePayload.layout, imagePayload.files);
+        } catch (imgErr) {
+          if (imgErr?.response?.status === 401) throw imgErr;
+          imageError = imgErr?.response?.data?.error || "Please try again.";
+        }
+      }
+
+      await loadWork();
+      closeWorkForm();
+      if (imageError) {
+        setWorkError(`The work item was saved, but its images weren't: ${imageError}`);
+      }
+    } catch (err) {
+      if (err?.response?.status === 401) {
+        setWorkError("Your session expired. Please log in again.");
+        handleLogout();
+      } else {
+        setWorkError("Couldn't save the work item.");
+      }
+    } finally {
+      setSavingWork(false);
+    }
+  };
+
+  const handleWorkDelete = async (item) => {
+    if (!window.confirm(`Delete "${item.title}"?`)) return;
+    setWorkError("");
+    try {
+      await deleteWork(item.id);
+      setWorkItems((prev) => prev.filter((w) => w.id !== item.id));
+    } catch (err) {
+      if (err?.response?.status === 401) {
+        setWorkError("Your session expired. Please log in again.");
+        handleLogout();
+      } else {
+        setWorkError("Couldn't delete the work item.");
+      }
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Orders
+  // ---------------------------------------------------------------------------
 
   // The server sends the customer email itself when this request succeeds
   // (only when moving to "completed"), so nothing extra is needed here.
@@ -379,10 +492,17 @@ export default function AdminPage() {
     );
   };
 
+  const heading =
+    view === "orders"
+      ? "Admin — Orders"
+      : shopTab === "work"
+      ? "Admin — Manage Work"
+      : "Admin — Manage Products";
+
   return (
     <div className="section" style={{ maxWidth: 1180, margin: "0 auto" }}>
       <div className="section-header">
-        <h2>{view === "shop" ? "Admin — Manage Products" : "Admin — Orders"}</h2>
+        <h2>{heading}</h2>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           <Link to="/" className="quote-note" style={{ color: "var(--text-muted)" }}>
             Back to site
@@ -414,50 +534,124 @@ export default function AdminPage() {
 
       {view === "shop" && (
         <>
-          <div className="product-toolbar">
-            <button className="add-product-btn" onClick={openAddForm}>
-              + Add product
-            </button>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 20,
+            }}
+          >
+            <div className="login-tabs" style={{ maxWidth: 320, marginBottom: 0, flex: 1 }}>
+              <button
+                className={`login-tab ${shopTab === "products" ? "active" : ""}`}
+                onClick={() => setShopTab("products")}
+              >
+                Products
+              </button>
+              <button
+                className={`login-tab ${shopTab === "work" ? "active" : ""}`}
+                onClick={() => setShopTab("work")}
+              >
+                Work items
+              </button>
+            </div>
+
+            {shopTab === "products" ? (
+              <button className="add-product-btn" onClick={openAddForm}>
+                + Add product
+              </button>
+            ) : (
+              <button className="add-product-btn" onClick={openAddWorkForm}>
+                + Add work item
+              </button>
+            )}
           </div>
 
-          {error && <div className="status-banner error">{error}</div>}
-          {loading && <div className="status-banner loading">Loading products…</div>}
+          {shopTab === "products" && (
+            <>
+              {error && <div className="status-banner error">{error}</div>}
+              {loading && <div className="status-banner loading">Loading products…</div>}
 
-          {!loading && products.length === 0 && !error && (
-            <div className="empty-panel">
-              <h3>No products found</h3>
-              <p>Add your first piece using the button above.</p>
-            </div>
+              {!loading && products.length === 0 && !error && (
+                <div className="empty-panel">
+                  <h3>No products found</h3>
+                  <p>Add your first piece using the button above.</p>
+                </div>
+              )}
+
+              {!loading && products.length > 0 && (
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext items={products.map((p) => p.id)} strategy={rectSortingStrategy}>
+                    <div className="product-grid">
+                      {products.map((product, index) => (
+                        <SortableProductCard
+                          key={product.id}
+                          product={product}
+                          onEdit={openEditForm}
+                          onDelete={handleDelete}
+                          onMoveLeft={(p) => handleMove(p, "left")}
+                          onMoveRight={(p) => handleMove(p, "right")}
+                          isFirst={index === 0}
+                          isLast={index === products.length - 1}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              )}
+
+              {showForm && (
+                <ProductForm
+                  initialProduct={editingProduct}
+                  onSubmit={handleSubmit}
+                  onClose={closeForm}
+                  saving={saving}
+                />
+              )}
+            </>
           )}
 
-          {!loading && products.length > 0 && (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-              <SortableContext items={products.map((p) => p.id)} strategy={rectSortingStrategy}>
-                <div className="product-grid">
-                  {products.map((product, index) => (
-                    <SortableProductCard
-                      key={product.id}
-                      product={product}
-                      onEdit={openEditForm}
-                      onDelete={handleDelete}
-                      onMoveLeft={(p) => handleMove(p, "left")}
-                      onMoveRight={(p) => handleMove(p, "right")}
-                      isFirst={index === 0}
-                      isLast={index === products.length - 1}
+          {shopTab === "work" && (
+            <>
+              {workError && <div className="status-banner error">{workError}</div>}
+              {workLoading && <div className="status-banner loading">Loading work items…</div>}
+
+              {!workLoading && workItems.length === 0 && !workError && (
+                <div className="empty-panel">
+                  <h3>No work items yet</h3>
+                  <p>Add your first piece of past work using the button above.</p>
+                </div>
+              )}
+
+              {!workLoading && workItems.length > 0 && (
+                <div className="work-grid">
+                  {workItems.map((item) => (
+                    <WorkCard
+                      key={item.id}
+                      item={item}
+                      onEdit={openEditWorkForm}
+                      onDelete={handleWorkDelete}
                     />
                   ))}
                 </div>
-              </SortableContext>
-            </DndContext>
-          )}
+              )}
 
-          {showForm && (
-            <ProductForm
-              initialProduct={editingProduct}
-              onSubmit={handleSubmit}
-              onClose={closeForm}
-              saving={saving}
-            />
+              {showWorkForm && (
+                <WorkForm
+                  initialItem={editingWork}
+                  onSubmit={handleWorkSubmit}
+                  onClose={closeWorkForm}
+                  saving={savingWork}
+                />
+              )}
+            </>
           )}
         </>
       )}

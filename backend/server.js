@@ -4,7 +4,7 @@
 // Environment variables
 //   Required:  JWT_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
 //   Production: NODE_ENV=production, APP_URL (https://yourdomain.com, no trailing slash),
-//               SMTP_HOST (+ SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM)
+//               BREVO_KEY, BREVO_SENDER_EMAIL (transactional email)
 //   Optional:  PORT, TRUST_PROXY=true (behind Railway/Fly/Nginx/Caddy),
 //              DATA_DIR (persistent volume, e.g. /data),
 //              STRIPE_CURRENCY (default usd),
@@ -90,13 +90,15 @@ function ensureDir(dir) {
 const uploadsDir = path.join(DATA_DIR, "uploads");
 const carouselDir = path.join(DATA_DIR, "carousel");
 const productsDir = path.join(DATA_DIR, "Products"); // one sub-folder per product
-const tmpUploadsDir = path.join(DATA_DIR, ".tmp-uploads"); // staging area for product images
+const repItemsDir = path.join(DATA_DIR, "RepItems"); // one sub-folder per rep item
+const tmpUploadsDir = path.join(DATA_DIR, ".tmp-uploads"); // staging area for images
 ensureDir(uploadsDir);
 ensureDir(carouselDir);
 ensureDir(productsDir);
+ensureDir(repItemsDir);
 ensureDir(tmpUploadsDir);
 
-const MAX_IMAGES = 20; // per product
+const MAX_IMAGES = 20; // per product / rep item
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB per image
 const PLACEHOLDER_IMAGE = "https://placehold.co/400x400?text=No+Image";
 const MIME_TO_EXT = {
@@ -130,8 +132,9 @@ const upload = multer({
   fileFilter: imageFileFilter,
 });
 
-// Product images are first staged in a temporary folder, checked, and only then
-// moved into Products/<product folder>/ under their final numbered names.
+// Product and rep-item images are first staged in a temporary folder, checked,
+// and only then moved into their final folder under their final numbered names.
+// (Used by both the product and the rep item image routes.)
 const uploadProductImages = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, tmpUploadsDir),
@@ -251,6 +254,25 @@ ensureColumn("orders", "paid_at", "TEXT");
 ensureColumn("orders", "shipping_json", "TEXT"); // name/address/phone collected by Stripe
 ensureColumn("two_factor_codes", "attempts", "INTEGER DEFAULT 0");
 
+// Rep items: things I have made, shown as my "repertoire" (not for sale).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rep_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    material TEXT DEFAULT '',
+    help_used TEXT DEFAULT '',
+    hours REAL,
+    service TEXT DEFAULT '',
+    weight TEXT DEFAULT '',
+    colors TEXT DEFAULT '',
+    specs TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    long_description TEXT DEFAULT '',
+    folder TEXT,
+    position INTEGER
+  )
+`);
+
 // One-time migration: give every existing product a folder, and copy its old
 // single image (from /uploads) into that folder as image number 1.
 function migrateProductFolders() {
@@ -302,7 +324,7 @@ app.use(
 const allowedOrigins = [
   "https://vellocity3d.vercel.app",
   ...(process.env.NODE_ENV !== "production" ? ["http://localhost:5173"] : []),
-  ...(process.env.NODE_ENV !== "production" ? ["http://172.31.48.1:5173/"] : []),
+  ...(process.env.NODE_ENV !== "production" ? ["http://172.24.3.76:5173/"] : []),
 ];
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
@@ -313,6 +335,12 @@ app.use("/uploads", express.static(uploadsDir));
 app.use(
   "/Products",
   express.static(productsDir, {
+    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+  })
+);
+app.use(
+  "/RepItems",
+  express.static(repItemsDir, {
     setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
   })
 );
@@ -349,8 +377,8 @@ async function sendCodeEmail(toEmail, code) {
     console.log(`[2FA] Verification code for ${toEmail}: ${code}`); // local testing only
   }
   if (!process.env.BREVO_KEY) {
-    if (IS_PROD) throw new Error("SMTP_HOST is not configured");
-    return; // no SMTP configured yet — console log is enough for local dev
+    if (IS_PROD) throw new Error("BREVO_KEY is not configured");
+    return; // no email provider configured yet — console log is enough for local dev
   }
   await sendMail({
     to: toEmail,
@@ -472,7 +500,7 @@ Total: ${money(order.total)}
 // Never throws — a failed email must not make the admin action fail.
 async function sendOrderStatusEmail(orderId, kind) {
   try {
-    if (!process.env.BREVO_KEY) return; // no SMTP configured yet
+    if (!process.env.BREVO_KEY) return; // no email provider configured yet
 
     const order = db
       .prepare(
@@ -491,7 +519,7 @@ async function sendOrderStatusEmail(orderId, kind) {
       username: order.username,
     });
 
-    await sendMail({to: order.email, subject, text, html });
+    await sendMail({ to: order.email, subject, text, html });
   } catch (err) {
     console.error(`Failed to send "${kind}" email for order ${orderId}:`, err.message);
   }
@@ -774,7 +802,7 @@ app.post("/api/auth/register", registerLimiter, async (req, res) => {
     return res.status(500).json({ error: "Server email configuration is incomplete." });
   }
   if (!process.env.BREVO_KEY) {
-    console.error("SMTP_HOST is missing");
+    console.error("BREVO_KEY is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }
 
@@ -854,7 +882,7 @@ app.post("/api/auth/resend-verification", registerLimiter, async (req, res) => {
   }
 
   if (!APP_URL || !process.env.BREVO_KEY) {
-    console.error("APP_URL or SMTP_HOST is missing");
+    console.error("APP_URL or BREVO_KEY is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }
 
@@ -1604,6 +1632,328 @@ app.delete("/api/products/:id", requireAdmin, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Rep items ("my repertoire": things I have made) — separate from products,
+// not for sale.
+//
+//   <DATA_DIR>/RepItems/<title>/1.jpg, 2.png, 3.webp ...
+//
+// Same image rules as products: the numbers are the display order (1 = cover),
+// the folder is named after the title and renamed when the title changes.
+// ---------------------------------------------------------------------------
+const getRepRow = (id) => db.prepare("SELECT * FROM rep_items WHERE id = ?").get(id);
+const repImageUrl = (folder, file) => `/RepItems/${encodeURIComponent(folder)}/${file}`;
+
+// Image file names in a rep item folder, sorted by their number (1, 2, 3, ...).
+function listRepImageFiles(folder) {
+  if (!folder) return [];
+  let files = [];
+  try {
+    files = fs.readdirSync(path.join(repItemsDir, folder));
+  } catch {
+    return [];
+  }
+  return files
+    .filter((f) => /^\d+\.(jpe?g|png|webp|gif)$/i.test(f))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+}
+
+function isRepFolderTaken(candidate, ownerId) {
+  const lower = candidate.toLowerCase();
+
+  const other = db
+    .prepare("SELECT id FROM rep_items WHERE lower(folder) = ? AND id != ?")
+    .get(lower, ownerId == null ? -1 : ownerId);
+  if (other) return true;
+
+  const own =
+    ownerId == null ? null : db.prepare("SELECT folder FROM rep_items WHERE id = ?").get(ownerId);
+  const ownsIt = own && own.folder && own.folder.toLowerCase() === lower;
+
+  // A folder that already exists on disk but belongs to nobody is not touched.
+  if (!ownsIt && fs.existsSync(path.join(repItemsDir, candidate))) return true;
+  return false;
+}
+
+// Folder name for a rep item: its title, plus " (2)", " (3)"... if that name is taken.
+function pickRepFolderName(title, ownerId) {
+  const base = sanitizeFolderName(title, ownerId == null ? "item" : `item-${ownerId}`);
+  let candidate = base;
+  let n = 2;
+  while (isRepFolderTaken(candidate, ownerId)) {
+    candidate = `${base} (${n++})`;
+  }
+  return candidate;
+}
+
+function shapeRepItem(row) {
+  const images = listRepImageFiles(row.folder).map((f) => repImageUrl(row.folder, f));
+  return {
+    id: row.id,
+    title: row.title,
+    material: row.material,
+    help_used: row.help_used,
+    hours: row.hours,
+    service: row.service,
+    weight: row.weight,
+    colors: row.colors,
+    specs: row.specs,
+    description: row.description,
+    long_description: row.long_description,
+    images,
+    image: images[0] || PLACEHOLDER_IMAGE,
+    position: row.position,
+  };
+}
+
+const repItemSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  material: z.string().max(200).optional(),
+  help_used: z.string().max(500).optional(),
+  hours: z.number().nonnegative().max(100000).nullable().optional(),
+  service: z.string().max(300).optional(),
+  weight: z.string().max(100).optional(),
+  colors: z.string().max(300).optional(),
+  specs: z.string().max(5000).optional(),
+  description: z.string().max(2000).optional(),
+  long_description: z.string().max(10000).optional(),
+});
+
+// Hours may arrive as a string from the form: "" clears it, anything else becomes a number.
+function parseRepBody(body) {
+  const b = body || {};
+  let hours = b.hours;
+  if (hours === "" || hours === null) hours = null;
+  else if (hours !== undefined) hours = Number(hours);
+  return { ...b, hours };
+}
+
+// READ (all, public)
+app.get("/api/rep-items", (req, res) => {
+  const rows = db.prepare("SELECT * FROM rep_items ORDER BY position ASC, id ASC").all();
+  res.json(rows.map(shapeRepItem));
+});
+
+// READ (one, public)
+app.get("/api/rep-items/:id", (req, res) => {
+  const row = getRepRow(req.params.id);
+  if (!row) return res.status(404).json({ error: "Item not found" });
+  res.json(shapeRepItem(row));
+});
+
+// CREATE
+app.post("/api/rep-items", requireAdmin, (req, res) => {
+  const parsed = repItemSchema.safeParse(parseRepBody(req.body));
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  const d = parsed.data;
+
+  const maxPos = db.prepare("SELECT MAX(position) AS m FROM rep_items").get().m;
+
+  const result = db
+    .prepare(
+      `INSERT INTO rep_items
+         (title, material, help_used, hours, service, weight, colors, specs,
+          description, long_description, folder, position)
+       VALUES
+         (@title, @material, @help_used, @hours, @service, @weight, @colors, @specs,
+          @description, @long_description, @folder, @position)`
+    )
+    .run({
+      title: d.title,
+      material: d.material || "",
+      help_used: d.help_used || "",
+      hours: d.hours ?? null,
+      service: d.service || "",
+      weight: d.weight || "",
+      colors: d.colors || "",
+      specs: d.specs || "",
+      description: d.description || "",
+      long_description: d.long_description || "",
+      folder: pickRepFolderName(d.title, null), // the folder itself is created with the first image
+      position: maxPos === null ? 0 : maxPos + 1,
+    });
+
+  res.status(201).json(shapeRepItem(getRepRow(result.lastInsertRowid)));
+});
+
+// UPDATE
+app.put("/api/rep-items/:id", requireAdmin, (req, res) => {
+  const existing = getRepRow(req.params.id);
+  if (!existing) return res.status(404).json({ error: "Item not found" });
+
+  const parsed = repItemSchema.partial().safeParse(parseRepBody(req.body));
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
+  }
+  const d = parsed.data;
+
+  // Renaming an item renames its image folder too.
+  let folder = existing.folder;
+  if (d.title !== undefined && d.title !== existing.title) {
+    const newFolder = pickRepFolderName(d.title, existing.id);
+    if (newFolder !== existing.folder) {
+      if (existing.folder) {
+        const oldDir = path.join(repItemsDir, existing.folder);
+        if (fs.existsSync(oldDir)) fs.renameSync(oldDir, path.join(repItemsDir, newFolder));
+      }
+      folder = newFolder;
+    }
+  }
+
+  db.prepare(
+    `UPDATE rep_items
+     SET title = @title, material = @material, help_used = @help_used, hours = @hours,
+         service = @service, weight = @weight, colors = @colors, specs = @specs,
+         description = @description, long_description = @long_description, folder = @folder
+     WHERE id = @id`
+  ).run({
+    title: d.title !== undefined ? d.title : existing.title,
+    material: d.material !== undefined ? d.material : existing.material,
+    help_used: d.help_used !== undefined ? d.help_used : existing.help_used,
+    hours: d.hours !== undefined ? d.hours : existing.hours,
+    service: d.service !== undefined ? d.service : existing.service,
+    weight: d.weight !== undefined ? d.weight : existing.weight,
+    colors: d.colors !== undefined ? d.colors : existing.colors,
+    specs: d.specs !== undefined ? d.specs : existing.specs,
+    description: d.description !== undefined ? d.description : existing.description,
+    long_description:
+      d.long_description !== undefined ? d.long_description : existing.long_description,
+    folder,
+    id: existing.id,
+  });
+
+  res.json(shapeRepItem(getRepRow(existing.id)));
+});
+
+// IMAGES — add, delete and reorder a rep item's images in one request.
+// Same format as PUT /api/products/:id/images:
+//   images  one or more NEW image files (optional)
+//   layout  JSON list in final display order: { "file": "2.jpg" } keeps an existing
+//           image, { "new": 0 } uses the uploaded file at that position.
+// Existing images missing from `layout` are deleted; the rest are renumbered 1, 2, 3...
+app.put(
+  "/api/rep-items/:id/images",
+  requireAdmin,
+  uploadProductImages.array("images", MAX_IMAGES),
+  async (req, res) => {
+    const uploaded = req.files || [];
+
+    try {
+      const item = getRepRow(req.params.id);
+      if (!item) return res.status(404).json({ error: "Item not found" });
+
+      if (typeof req.body.layout !== "string") {
+        return res.status(400).json({ error: "layout is required" });
+      }
+      let layout;
+      try {
+        layout = JSON.parse(req.body.layout);
+      } catch {
+        return res.status(400).json({ error: "layout must be valid JSON" });
+      }
+      if (!Array.isArray(layout) || layout.length > MAX_IMAGES) {
+        return res.status(400).json({ error: `At most ${MAX_IMAGES} images are allowed` });
+      }
+
+      // Check what was really uploaded (by content, not by file name).
+      const { fileTypeFromFile } = await import("file-type");
+      const newExts = [];
+      for (const f of uploaded) {
+        const type = await fileTypeFromFile(f.path);
+        if (!type || !MIME_TO_EXT[type.mime]) {
+          return res.status(400).json({ error: `"${f.originalname}" is not a valid image` });
+        }
+        newExts.push(MIME_TO_EXT[type.mime]);
+      }
+
+      let folder = item.folder;
+      if (!folder) {
+        folder = pickRepFolderName(item.title, item.id);
+        db.prepare("UPDATE rep_items SET folder = ? WHERE id = ?").run(folder, item.id);
+      }
+      const dir = path.join(repItemsDir, folder);
+
+      // Validate the layout against what exists / was uploaded.
+      const existingFiles = listRepImageFiles(folder);
+      const keptExisting = new Set();
+      const usedNew = new Set();
+      for (const entry of layout) {
+        if (entry && typeof entry.file === "string") {
+          if (!existingFiles.includes(entry.file) || keptExisting.has(entry.file)) {
+            return res.status(400).json({ error: "layout refers to an unknown image" });
+          }
+          keptExisting.add(entry.file);
+        } else if (entry && Number.isInteger(entry.new)) {
+          if (entry.new < 0 || entry.new >= uploaded.length || usedNew.has(entry.new)) {
+            return res.status(400).json({ error: "layout refers to an unknown upload" });
+          }
+          usedNew.add(entry.new);
+        } else {
+          return res.status(400).json({ error: "layout contains an invalid entry" });
+        }
+      }
+
+      fs.mkdirSync(dir, { recursive: true });
+
+      const plan = layout.map((entry) =>
+        typeof entry.file === "string"
+          ? { existing: true, src: path.join(dir, entry.file), ext: path.extname(entry.file).toLowerCase() }
+          : { existing: false, src: uploaded[entry.new].path, ext: newExts[entry.new] }
+      );
+
+      // 1) Delete the images that were removed.
+      for (const f of existingFiles) {
+        if (!keptExisting.has(f)) fs.unlinkSync(path.join(dir, f));
+      }
+
+      // 2) Park the kept images under temporary names so renumbering can't collide.
+      plan.forEach((p, i) => {
+        if (p.existing) {
+          const tmp = path.join(dir, `.tmp-${i}${p.ext}`);
+          fs.renameSync(p.src, tmp);
+          p.src = tmp;
+        }
+      });
+
+      // 3) Give every image its final number: 1, 2, 3, ...
+      const now = new Date();
+      plan.forEach((p, i) => {
+        const dest = path.join(dir, `${i + 1}${p.ext}`);
+        moveFile(p.src, dest);
+        fs.utimesSync(dest, now, now); // new timestamp so browsers drop any cached copy
+      });
+
+      res.json(shapeRepItem(getRepRow(item.id)));
+    } finally {
+      // Remove whatever is left of the staged uploads (moved files are already gone).
+      uploaded.forEach((f) => fs.unlink(f.path, () => {}));
+    }
+  }
+);
+
+// DELETE
+app.delete("/api/rep-items/:id", requireAdmin, (req, res) => {
+  const item = getRepRow(req.params.id);
+  if (!item) return res.status(404).json({ error: "Item not found" });
+
+  db.prepare("DELETE FROM rep_items WHERE id = ?").run(item.id);
+
+  // Remove the item's whole image folder.
+  if (item.folder) {
+    const root = path.resolve(repItemsDir);
+    const dir = path.resolve(repItemsDir, item.folder);
+    if (dir.startsWith(root + path.sep)) {
+      fs.rm(dir, { recursive: true, force: true }, (err) => {
+        if (err) console.error("Failed to delete rep item image folder:", dir, err.message);
+      });
+    }
+  }
+
+  res.json({ message: "Item deleted" });
+});
+
+// ---------------------------------------------------------------------------
 // Health check + (optional) built frontend
 // ---------------------------------------------------------------------------
 app.get("/api/health", (req, res) => {
@@ -1616,7 +1966,7 @@ const distDir = process.env.FRONTEND_DIST || path.join(__dirname, "..", "fronten
 if (fs.existsSync(path.join(distDir, "index.html"))) {
   app.use(express.static(distDir));
   // SPA fallback so client-side routes like /verify-email?token=... load index.html.
-  app.get(/^\/(?!api\/|uploads\/|carousel\/|Products\/).*/, (req, res) => {
+  app.get(/^\/(?!api\/|uploads\/|carousel\/|Products\/|RepItems\/).*/, (req, res) => {
     res.sendFile(path.join(distDir, "index.html"));
   });
 } else {

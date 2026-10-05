@@ -338,6 +338,119 @@ a {
   background: rgba(0, 0, 0, 0.3); color: #fff; font-size: 20px;
   line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s;
 }
+
+.view-tabs {
+  display: inline-flex;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 28px;
+}
+
+.view-tab {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.view-tab:hover {
+  color: var(--text);
+}
+
+.view-tab.active {
+  background: var(--accent);
+  color: white;
+}
+
+.work-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 22px;
+}
+
+.work-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.work-card-media img,
+.work-card-empty {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+  background: #1a1a38;
+}
+
+.work-card-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.work-card-body {
+  padding: 18px 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.work-card-title {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.work-card-media {
+  position: relative;
+}
+
+.work-card-details {
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.work-card-detail {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.82rem;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.work-card-detail dt {
+  color: var(--text-dim);
+}
+
+.work-card-detail dd {
+  margin: 0;
+  color: var(--text-muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.work-card-desc {
+  font-size: 0.86rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+}
+
 .card-arrow-left { left: 8px; }
 .card-arrow-right { right: 8px; }
 .product-card:hover .card-arrow { opacity: 1; }

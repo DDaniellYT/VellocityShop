@@ -98,6 +98,38 @@ export const syncProductImages = (id, layout, files = []) => {
   });
 };
 
+// ---------------------------------------------------------------------------
+// Work items ("Our work" portfolio)
+// ---------------------------------------------------------------------------
+export const getWork = () =>
+  client.get("/work");
+
+export const getWorkItem = (id) =>
+  client.get(`/work/${id}`);
+
+// data: { title, description, details: [{ label, value }, ...] }
+export const createWork = (data) =>
+  client.post("/work", data);
+
+export const updateWork = (id, data) =>
+  client.put(`/work/${id}`, data);
+
+export const deleteWork = (id) =>
+  client.delete(`/work/${id}`);
+
+// Same layout format as syncProductImages.
+export const syncWorkImages = (id, layout, files = []) => {
+  const formData = new FormData();
+  formData.append("layout", JSON.stringify(layout));
+  files.forEach((file) => formData.append("images", file));
+
+  return client.put(`/work/${id}/images`, formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+};
+
 export const updateOrderAwb = (
   id,
   awb_number,

@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 export default function Hero() {
   return (
     <section className="hero">
@@ -9,12 +11,12 @@ export default function Hero() {
           A working archive of my 3D prints — 
         </p>
         <div className="hero-actions">
-          <a href="#products" className="btn btn-primary">
+          <Link to="/#products" className="btn btn-primary">
             Shop the prints →
-          </a>
-          <a href="#work" className="btn btn-outline">
+          </Link>
+          <Link to="/?view=work#products" className="btn btn-outline">
             See the work
-          </a>
+          </Link>
         </div>
       </div>
     </section>

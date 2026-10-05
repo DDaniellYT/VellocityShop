@@ -302,7 +302,7 @@ app.use(
 const allowedOrigins = [
   "https://vellocity3d.vercel.app",
   ...(process.env.NODE_ENV !== "production" ? ["http://localhost:5173"] : []),
-  ...(process.env.NODE_ENV !== "production" ? ["http://10.123.22.253:5173"] : []),
+  ...(process.env.NODE_ENV !== "production" ? ["http://172.31.48.1:5173/"] : []),
 ];
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));

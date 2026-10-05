@@ -49,6 +49,9 @@ export default function ProductDetailPage() {
     : [];
   const shownImage = images[Math.min(activeImage, images.length - 1)];
 
+  const step = (dir) =>
+    setActiveImage((i) => (Math.min(i, images.length - 1) + dir + images.length) % images.length);
+
   return (
     <>
       <Navbar />
@@ -67,11 +70,33 @@ export default function ProductDetailPage() {
         {!loading && product && (
           <div className="product-detail">
             <div className="product-detail-media">
-              <img
-                className="product-detail-image"
-                src={toSrc(shownImage)}
-                alt={product.name}
-              />
+              <div style={{ position: "relative" }}>
+                <img
+                  className="product-detail-image"
+                  src={toSrc(shownImage)}
+                  alt={product.name}
+                />
+                {images.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      className="card-arrow card-arrow-left card-arrow-always"
+                      onClick={() => step(-1)}
+                      aria-label="Previous image"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      className="card-arrow card-arrow-right card-arrow-always"
+                      onClick={() => step(1)}
+                      aria-label="Next image"
+                    >
+                      ›
+                    </button>
+                  </>
+                )}
+              </div>
               {images.length > 1 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                   {images.map((url, i) => (

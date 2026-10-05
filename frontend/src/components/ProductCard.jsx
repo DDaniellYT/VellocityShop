@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_ORIGIN } from "../api.js";
 
@@ -15,6 +16,16 @@ export default function ProductCard({
   const navigate = useNavigate();
   const showMoveControls = onMoveLeft || onMoveRight;
 
+  const [index, setIndex] = useState(0);
+  const urls = product.images?.length ? product.images : [product.image];
+  const toUrl = (u) => (u?.startsWith("http") ? u : `${API_ORIGIN}${u}`);
+  const hasMany = urls.length > 1;
+  const current = Math.min(index, urls.length - 1); // safe if images get removed
+  const step = (e, dir) => {
+    e.stopPropagation(); // don't trigger the card's click-through
+    setIndex((current + dir + urls.length) % urls.length);
+  };
+
   const goToDetail = () => navigate(`/products/${product.id}`);
 
   return (
@@ -26,9 +37,29 @@ export default function ProductCard({
       <div style={{ position: "relative" }}>
         <img
           className="product-image"
-          src={product.image?.startsWith("http") ? product.image : `${API_ORIGIN}${product.image}`}
+          src={toUrl(urls[current])}
           alt={product.name}
         />
+        {hasMany && (
+          <>
+            <button
+              type="button"
+              className="card-arrow card-arrow-left"
+              onClick={(e) => step(e, -1)}
+              aria-label="Previous image"
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              className="card-arrow card-arrow-right"
+              onClick={(e) => step(e, 1)}
+              aria-label="Next image"
+            >
+              ›
+            </button>
+          </>
+        )}
         {showMoveControls && (
           <div className="product-move-controls">
             <button

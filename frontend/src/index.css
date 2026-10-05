@@ -332,6 +332,17 @@ a {
   gap: 22px;
 }
 
+.card-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 32px; height: 32px; border: none; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.3); color: #fff; font-size: 20px;
+  line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.15s;
+}
+.card-arrow-left { left: 8px; }
+.card-arrow-right { right: 8px; }
+.product-card:hover .card-arrow { opacity: 1; }
+@media (hover: none) { .card-arrow { opacity: 1; } } /* always visible on phones */
+.card-arrow-always { opacity: 1; }
 .product-card {
   height: 100%;
   background: var(--bg-card);

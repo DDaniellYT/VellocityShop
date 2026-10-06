@@ -56,7 +56,6 @@ export default function ProductDetailPage() {
     <>
       <Navbar />
       <section className="section product-detail-section">
-        <Link to="/" className="quote-note">← Back to store</Link>
 
         {loading && <div className="status-banner loading">Loading product…</div>}
 

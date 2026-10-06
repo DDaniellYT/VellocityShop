@@ -2,38 +2,41 @@ import { useEffect, useRef, useState } from "react";
 import { API_ORIGIN } from "../api.js";
 
 const MAX_IMAGES = 20;
-const MAX_DETAILS = 30;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB, same limit as the server
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const ALLOWED_EXT = /\.(jpe?g|png|webp|gif)$/i;
 
 const emptyForm = {
   title: "",
+  material: "",
+  help_used: "",
+  hours: "",
+  service: "",
+  weight: "",
+  colors: "",
+  specs: "",
   description: "",
+  long_description: "",
 };
 
 // Ids only need to be unique inside this form.
-let idCounter = 0;
-const makeId = () => `w-${Date.now()}-${idCounter++}`;
+let imageCounter = 0;
+const makeImageId = () => `img-${Date.now()}-${imageCounter++}`;
 
 const toAbsolute = (url) => (url.startsWith("http") ? url : `${API_ORIGIN}${url}`);
 const fileNameFromUrl = (url) => decodeURIComponent(url.split("/").pop());
 
-// Images the work item already has on the server, in their saved order.
+// Images the item already has on the server, in their saved order.
 const imagesFromItem = (item) =>
   (item?.images || []).map((url) => ({
-    id: makeId(),
+    id: makeImageId(),
     kind: "existing",
     file: fileNameFromUrl(url), // e.g. "2.jpg"
     preview: toAbsolute(url),
   }));
 
-const detailsFromItem = (item) =>
-  (item?.details || []).map((d) => ({ id: makeId(), label: d.label, value: d.value }));
-
-export default function WorkForm({ initialItem, onSubmit, onClose, saving }) {
+export default function RepItemForm({ initialItem, onSubmit, onClose, saving }) {
   const [form, setForm] = useState(emptyForm);
-  const [details, setDetails] = useState([]);
   const [images, setImages] = useState([]);
   const [imageError, setImageError] = useState("");
 
@@ -45,13 +48,19 @@ export default function WorkForm({ initialItem, onSubmit, onClose, saving }) {
     if (initialItem) {
       setForm({
         title: initialItem.title || "",
+        material: initialItem.material || "",
+        help_used: initialItem.help_used || "",
+        hours: initialItem.hours ?? "",
+        service: initialItem.service || "",
+        weight: initialItem.weight || "",
+        colors: initialItem.colors || "",
+        specs: initialItem.specs || "",
         description: initialItem.description || "",
+        long_description: initialItem.long_description || "",
       });
-      setDetails(detailsFromItem(initialItem));
       setImages(imagesFromItem(initialItem));
     } else {
       setForm(emptyForm);
-      setDetails([]);
       setImages([]);
     }
     setImageError("");
@@ -71,22 +80,6 @@ export default function WorkForm({ initialItem, onSubmit, onClose, saving }) {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  // ---- detail rows ----
-  const addDetail = () => {
-    setDetails((prev) =>
-      prev.length >= MAX_DETAILS ? prev : [...prev, { id: makeId(), label: "", value: "" }]
-    );
-  };
-
-  const changeDetail = (id, field, value) => {
-    setDetails((prev) => prev.map((d) => (d.id === id ? { ...d, [field]: value } : d)));
-  };
-
-  const removeDetail = (id) => {
-    setDetails((prev) => prev.filter((d) => d.id !== id));
-  };
-
-  // ---- images ----
   const handleFilesChange = (e) => {
     const picked = Array.from(e.target.files || []);
     e.target.value = ""; // lets the same file be picked again later
@@ -107,11 +100,11 @@ export default function WorkForm({ initialItem, onSubmit, onClose, saving }) {
         continue;
       }
       if (accepted.length >= room) {
-        problem = `A work item can have at most ${MAX_IMAGES} images.`;
+        problem = `An item can have at most ${MAX_IMAGES} images.`;
         break;
       }
       accepted.push({
-        id: makeId(),
+        id: makeImageId(),
         kind: "new",
         file,
         preview: URL.createObjectURL(file),
@@ -163,22 +156,13 @@ export default function WorkForm({ initialItem, onSubmit, onClose, saving }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-
-    // Rows without a label are dropped (the server requires a label).
-    const cleanDetails = details
-      .map((d) => ({ label: d.label.trim(), value: d.value.trim() }))
-      .filter((d) => d.label);
-
-    onSubmit(
-      { title: form.title, description: form.description, details: cleanDetails },
-      buildImagePayload()
-    );
+    onSubmit(form, buildImagePayload());
   };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{initialItem ? "Edit work item" : "Add a new work item"}</h3>
+        <h3>{initialItem ? "Edit item" : "Add a new item"}</h3>
         <form onSubmit={handleSubmit}>
           <div className="form-row">
             <label>Title</label>
@@ -186,73 +170,117 @@ export default function WorkForm({ initialItem, onSubmit, onClose, saving }) {
               name="title"
               value={form.title}
               onChange={handleChange}
-              placeholder="Custom desk organizer"
+              placeholder="Articulated model bus"
+              maxLength={200}
               required
             />
           </div>
 
           <div className="form-row">
-            <label>Description</label>
-            <textarea
-              name="description"
-              rows={5}
-              maxLength={5000}
-              value={form.description}
+            <label>Material</label>
+            <input
+              name="material"
+              value={form.material}
               onChange={handleChange}
-              placeholder="What this was, who it was for, what made it interesting..."
+              placeholder="PETG"
+              maxLength={200}
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Help used</label>
+            <input
+              name="help_used"
+              value={form.help_used}
+              onChange={handleChange}
+              placeholder="Client files, dimensions, an idea..."
+              maxLength={500}
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Time to complete, start to finish (hours)</label>
+            <input
+              name="hours"
+              type="number"
+              step="0.5"
+              min="0"
+              value={form.hours}
+              onChange={handleChange}
+              placeholder="12"
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Service used</label>
+            <input
+              name="service"
+              value={form.service}
+              onChange={handleChange}
+              placeholder="3D scanning, prototyping, mesh repair, 3D printing..."
+              maxLength={300}
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Weight of the part</label>
+            <input
+              name="weight"
+              value={form.weight}
+              onChange={handleChange}
+              placeholder="320 g"
+              maxLength={100}
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Colors used</label>
+            <input
+              name="colors"
+              value={form.colors}
+              onChange={handleChange}
+              placeholder="Yellow, black"
+              maxLength={300}
+            />
+          </div>
+
+          <div className="form-row">
+            <label>Other specifications</label>
+            <textarea
+              name="specs"
+              rows={4}
+              value={form.specs}
+              onChange={handleChange}
+              placeholder="e.g. the bus also has moving wheels, moving doors..."
             />
           </div>
 
           <div className="form-row">
             <label>
-              Details{" "}
+              Short description{" "}
               <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>
-                ({details.length}/{MAX_DETAILS})
+                ({form.description.length}/300)
               </span>
             </label>
-            <span style={{ fontSize: "0.8rem", color: "var(--text-dim)" }}>
-              Add any label and value you want, e.g. Material: PETG, Print time: 6h.
-            </span>
+            <textarea
+              name="description"
+              rows={3}
+              maxLength={300}
+              value={form.description}
+              onChange={handleChange}
+              placeholder="Short summary shown on the card..."
+            />
+          </div>
 
-            {details.map((d, index) => (
-              <div key={d.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  value={d.label}
-                  onChange={(e) => changeDetail(d.id, "label", e.target.value)}
-                  placeholder="Label"
-                  maxLength={100}
-                  aria-label={`Detail ${index + 1} label`}
-                  style={{ flex: 1, minWidth: 0 }}
-                />
-                <input
-                  value={d.value}
-                  onChange={(e) => changeDetail(d.id, "value", e.target.value)}
-                  placeholder="Value"
-                  maxLength={1000}
-                  aria-label={`Detail ${index + 1} value`}
-                  style={{ flex: 2, minWidth: 0 }}
-                />
-                <button
-                  type="button"
-                  className="icon-btn danger"
-                  style={{ flex: "none", padding: "8px 12px" }}
-                  onClick={() => removeDetail(d.id)}
-                  aria-label={`Remove detail ${index + 1}`}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-
-            <button
-              type="button"
-              className="icon-btn"
-              style={{ flex: "none", padding: "8px 14px", alignSelf: "flex-start" }}
-              onClick={addDetail}
-              disabled={details.length >= MAX_DETAILS}
-            >
-              + Add detail
-            </button>
+          <div className="form-row">
+            <label>Full description</label>
+            <textarea
+              name="long_description"
+              rows={6}
+              value={form.long_description}
+              onChange={handleChange}
+              placeholder="The full story, shown on the item page..."
+            />
           </div>
 
           <div className="form-row">
@@ -351,7 +379,7 @@ export default function WorkForm({ initialItem, onSubmit, onClose, saving }) {
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? "Saving..." : initialItem ? "Save changes" : "Add work item"}
+              {saving ? "Saving..." : initialItem ? "Save changes" : "Add item"}
             </button>
           </div>
         </form>

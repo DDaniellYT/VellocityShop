@@ -5,8 +5,8 @@ import Hero from "../components/Hero.jsx";
 import Process from "../components/Process.jsx";
 import Footer from "../components/Footer.jsx";
 import ProductCard from "../components/ProductCard.jsx";
-import WorkCard from "../components/WorkCard.jsx";
-import { getProducts, getWork } from "../api.js";
+import RepItemCard from "../components/RepItemCard.jsx";
+import { getProducts, getRepItems } from "../api.js";
 import { useCart } from "../CartContext.jsx";
 import Carousel from "../components/Carousel.jsx";
 
@@ -29,9 +29,9 @@ export default function Storefront() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [workItems, setWorkItems] = useState([]);
-  const [workLoading, setWorkLoading] = useState(true);
-  const [workError, setWorkError] = useState("");
+  const [repItems, setRepItems] = useState([]);
+  const [repLoading, setRepLoading] = useState(true);
+  const [repError, setRepError] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -51,12 +51,12 @@ export default function Storefront() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await getWork();
-        setWorkItems(res.data);
+        const res = await getRepItems();
+        setRepItems(res.data);
       } catch {
-        setWorkError("Couldn't load our work right now.");
+        setRepError("Couldn't load our rep items right now.");
       } finally {
-        setWorkLoading(false);
+        setRepLoading(false);
       }
     })();
   }, []);
@@ -81,20 +81,20 @@ export default function Storefront() {
 
         {view === "work" && (
           <>
-            {workError && <div className="status-banner error">{workError}</div>}
-            {workLoading && <div className="status-banner loading">Loading our work…</div>}
+            {repError && <div className="status-banner error">{repError}</div>}
+            {repLoading && <div className="status-banner loading">Loading our work…</div>}
 
-            {!workLoading && workItems.length === 0 && !workError && (
+            {!repLoading && repItems.length === 0 && !repError && (
               <div className="empty-panel">
                 <h3>Nothing here yet</h3>
                 <p>Check back soon.</p>
               </div>
             )}
 
-            {!workLoading && workItems.length > 0 && (
+            {!repLoading && repItems.length > 0 && (
               <div className="work-grid">
-                {workItems.map((item) => (
-                  <WorkCard key={item.id} item={item} />
+                {repItems.map((item) => (
+                  <RepItemCard key={item.id} item={item} />
                 ))}
               </div>
             )}

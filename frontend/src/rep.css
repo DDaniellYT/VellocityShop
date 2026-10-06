@@ -1,0 +1,273 @@
+/* ---------------- Rep items: grid + card ---------------- */
+.rep-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 22px;
+}
+
+.rep-card {
+  height: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.rep-card:hover {
+  border-color: #35355f;
+  transform: translateY(-2px);
+}
+
+.rep-card-media {
+  position: relative;
+}
+
+.rep-card-media img,
+.rep-card-empty {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+  background: #1a1a38;
+}
+
+.rep-card-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.rep-card-body {
+  padding: 18px 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.rep-card-title {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.rep-card-desc {
+  font-size: 0.86rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* ---------------- Image arrows (card + detail page) ---------------- */
+.rep-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.rep-arrow-left {
+  left: 8px;
+}
+
+.rep-arrow-right {
+  right: 8px;
+}
+
+.rep-card:hover .rep-arrow,
+.rep-detail-stage:hover .rep-arrow,
+.rep-arrow:focus-visible {
+  opacity: 1;
+}
+
+/* always visible on phones */
+@media (hover: none) {
+  .rep-arrow {
+    opacity: 1;
+  }
+}
+
+/* ---------------- Descriptors (material, hours, ...) ---------------- */
+.rep-facts {
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rep-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.82rem;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.rep-fact dt {
+  color: var(--text-dim);
+  flex: none;
+}
+
+.rep-fact dd {
+  margin: 0;
+  color: var(--text-muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.rep-facts-large {
+  margin-top: 24px;
+  gap: 10px;
+}
+
+.rep-facts-large .rep-fact {
+  font-size: 0.95rem;
+  padding-top: 10px;
+}
+
+/* ---------------- Detail page ---------------- */
+.rep-detail {
+  display: flex;
+  gap: 40px;
+  align-items: flex-start;
+}
+
+.rep-detail-media,
+.rep-detail-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.rep-detail-media {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rep-detail-stage {
+  position: relative;
+}
+
+.rep-detail-image {
+  width: 100%;
+  max-height: 520px;
+  object-fit: cover;
+  display: block;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.rep-detail-noimage {
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1a38;
+  color: var(--text-dim);
+}
+
+.rep-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rep-thumb {
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.rep-thumb.active {
+  border: 2px solid var(--accent);
+  opacity: 1;
+}
+
+.rep-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.rep-detail-specs {
+  padding: 18px 20px;
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.rep-detail-specs-title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.rep-detail-info h1 {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  margin: 10px 0 16px;
+}
+
+.rep-detail-desc {
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .rep-detail {
+    flex-direction: column;
+  }
+
+  .rep-detail-media,
+  .rep-detail-info {
+    width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .rep-detail-info h1 {
+    font-size: 1.5rem;
+  }
+}

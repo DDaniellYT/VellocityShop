@@ -99,31 +99,32 @@ export const syncProductImages = (id, layout, files = []) => {
 };
 
 // ---------------------------------------------------------------------------
-// Work items ("Our work" portfolio)
+// Rep items ("my repertoire": things I have made, not for sale)
 // ---------------------------------------------------------------------------
-export const getWork = () =>
-  client.get("/work");
+export const getRepItems = () =>
+  client.get("/rep-items");
 
-export const getWorkItem = (id) =>
-  client.get(`/work/${id}`);
+export const getRepItem = (id) =>
+  client.get(`/rep-items/${id}`);
 
-// data: { title, description, details: [{ label, value }, ...] }
-export const createWork = (data) =>
-  client.post("/work", data);
+// data: { title, material, help_used, hours, service, weight, colors, specs,
+//         description, long_description }
+export const createRepItem = (data) =>
+  client.post("/rep-items", data);
 
-export const updateWork = (id, data) =>
-  client.put(`/work/${id}`, data);
+export const updateRepItem = (id, data) =>
+  client.put(`/rep-items/${id}`, data);
 
-export const deleteWork = (id) =>
-  client.delete(`/work/${id}`);
+export const deleteRepItem = (id) =>
+  client.delete(`/rep-items/${id}`);
 
 // Same layout format as syncProductImages.
-export const syncWorkImages = (id, layout, files = []) => {
+export const syncRepItemImages = (id, layout, files = []) => {
   const formData = new FormData();
   formData.append("layout", JSON.stringify(layout));
   files.forEach((file) => formData.append("images", file));
 
-  return client.put(`/work/${id}/images`, formData, {
+  return client.put(`/rep-items/${id}/images`, formData, {
     headers: {
       "Content-Type": "multipart/form-data",
     },

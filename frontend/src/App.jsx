@@ -7,7 +7,7 @@ import AccountPage from "./pages/AccountPage.jsx";
 import NotFoundPage from "./pages/NotFoundPage.jsx";
 import ProductDetailPage from "./pages/ProductDetailPage.jsx";
 import VerifyEmailPage from "./pages/VerifyEmailPage.jsx";
-
+import RepItemDetailPage from "./components/RepItemDetailPage.jsx";
 
 export default function App() {
   return (
@@ -16,6 +16,7 @@ export default function App() {
       <Route path="/" element={<Storefront />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/products/:id" element={<ProductDetailPage />} />
+      <Route path="/rep/:id" element={<RepItemDetailPage />}/>
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/account" element={<AccountPage />} />

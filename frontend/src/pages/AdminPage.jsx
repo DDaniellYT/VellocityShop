@@ -14,8 +14,8 @@ import {
 } from "@dnd-kit/sortable";
 import SortableProductCard from "../components/SortableProductCard.jsx";
 import ProductForm from "../components/ProductForm.jsx";
-import WorkCard from "../components/WorkCard.jsx";
-import WorkForm from "../components/WorkForm.jsx";
+import RepItemCard from "../components/RepItemCard.jsx";
+import RepItemForm from "../components/RepItemForm.jsx";
 import { useAuth } from "../AuthContext.jsx";
 import {
   getProducts,
@@ -25,11 +25,11 @@ import {
   moveProduct,
   reorderProducts,
   syncProductImages,
-  getWork,
-  createWork,
-  updateWork,
-  deleteWork,
-  syncWorkImages,
+  getRepItems,
+  createRepItem,
+  updateRepItem,
+  deleteRepItem,
+  syncRepItemImages,
   getAllOrders,
   updateOrderStatus,
   updateOrderAwb,
@@ -40,7 +40,7 @@ export default function AdminPage() {
   const { user, logout } = useAuth();
 
   const [view, setView] = useState("shop"); // "shop" | "orders"
-  const [shopTab, setShopTab] = useState("products"); // "products" | "work"
+  const [shopTab, setShopTab] = useState("products"); // "products" | "rep"
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -49,12 +49,12 @@ export default function AdminPage() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const [workItems, setWorkItems] = useState([]);
-  const [workLoading, setWorkLoading] = useState(true);
-  const [workError, setWorkError] = useState("");
-  const [showWorkForm, setShowWorkForm] = useState(false);
-  const [editingWork, setEditingWork] = useState(null);
-  const [savingWork, setSavingWork] = useState(false);
+  const [repItems, setRepItems] = useState([]);
+  const [repLoading, setRepLoading] = useState(true);
+  const [repError, setRepError] = useState("");
+  const [showRepForm, setShowRepForm] = useState(false);
+  const [editingRep, setEditingRep] = useState(null);
+  const [savingRep, setSavingRep] = useState(false);
 
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(true);
@@ -88,16 +88,16 @@ export default function AdminPage() {
     }
   };
 
-  const loadWork = async () => {
-    setWorkLoading(true);
-    setWorkError("");
+  const loadRepItems = async () => {
+    setRepLoading(true);
+    setRepError("");
     try {
-      const res = await getWork();
-      setWorkItems(res.data);
+      const res = await getRepItems();
+      setRepItems(res.data);
     } catch {
-      setWorkError("Couldn't load the work items.");
+      setRepError("Couldn't load the rep items.");
     } finally {
-      setWorkLoading(false);
+      setRepLoading(false);
     }
   };
 
@@ -130,7 +130,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (user?.role === "admin") {
       loadProducts();
-      loadWork();
+      loadRepItems();
     }
   }, [user]);
 
@@ -262,74 +262,74 @@ export default function AdminPage() {
   // ---------------------------------------------------------------------------
   // Work items
   // ---------------------------------------------------------------------------
-  const openAddWorkForm = () => {
-    setEditingWork(null);
-    setShowWorkForm(true);
+  const openAddRepForm = () => {
+    setEditingRep(null);
+    setShowRepForm(true);
   };
 
-  const openEditWorkForm = (item) => {
-    setEditingWork(item);
-    setShowWorkForm(true);
+  const openEditRepForm = (item) => {
+    setEditingRep(item);
+    setShowRepForm(true);
   };
 
-  const closeWorkForm = () => {
-    setShowWorkForm(false);
-    setEditingWork(null);
+  const closeRepForm = () => {
+    setShowRepForm(false);
+    setEditingRep(null);
   };
 
   // Text + details are saved first, then the images in a second request.
-  const handleWorkSubmit = async (form, imagePayload) => {
-    setSavingWork(true);
-    setWorkError("");
+  const handleRepSubmit = async (form, imagePayload) => {
+    setSavingRep(true);
+    setRepError("");
     try {
       let saved;
-      if (editingWork) {
-        const res = await updateWork(editingWork.id, form);
+      if (editingRep) {
+        const res = await updateRepItem(editingRep.id, form);
         saved = res.data;
       } else {
-        const res = await createWork(form);
+        const res = await createRepItem(form);
         saved = res.data;
       }
 
       let imageError = "";
       if (imagePayload?.changed) {
         try {
-          await syncWorkImages(saved.id, imagePayload.layout, imagePayload.files);
+          await syncRepItemImages(saved.id, imagePayload.layout, imagePayload.files);
         } catch (imgErr) {
           if (imgErr?.response?.status === 401) throw imgErr;
           imageError = imgErr?.response?.data?.error || "Please try again.";
         }
       }
 
-      await loadWork();
-      closeWorkForm();
+      await loadRepItems();
+      closeRepForm();
       if (imageError) {
-        setWorkError(`The work item was saved, but its images weren't: ${imageError}`);
+        setRepError(`The rep item was saved, but its images weren't: ${imageError}`);
       }
     } catch (err) {
       if (err?.response?.status === 401) {
-        setWorkError("Your session expired. Please log in again.");
+        setRepError("Your session expired. Please log in again.");
         handleLogout();
       } else {
-        setWorkError("Couldn't save the work item.");
+        setRepError("Couldn't save the rep item.");
       }
     } finally {
-      setSavingWork(false);
+      setSavingRep(false);
     }
   };
 
-  const handleWorkDelete = async (item) => {
+  const handleRepDelete = async (item) => {
     if (!window.confirm(`Delete "${item.title}"?`)) return;
-    setWorkError("");
+    setRepError("");
     try {
-      await deleteWork(item.id);
-      setWorkItems((prev) => prev.filter((w) => w.id !== item.id));
+      await deleteRepItem(item.id);
+      setRepItems((prev) => prev.filter((r) => r.id !== item.id));
     } catch (err) {
       if (err?.response?.status === 401) {
-        setWorkError("Your session expired. Please log in again.");
+        setRepError("Your session expired. Please log in again.");
         handleLogout();
       } else {
-        setWorkError("Couldn't delete the work item.");
+        setRepError("Couldn't delete the rep item.");
       }
     }
   };
@@ -564,7 +564,7 @@ export default function AdminPage() {
                 + Add product
               </button>
             ) : (
-              <button className="add-product-btn" onClick={openAddWorkForm}>
+              <button className="add-product-btn" onClick={openAddRepForm}>
                 + Add work item
               </button>
             )}
@@ -620,35 +620,35 @@ export default function AdminPage() {
 
           {shopTab === "work" && (
             <>
-              {workError && <div className="status-banner error">{workError}</div>}
-              {workLoading && <div className="status-banner loading">Loading work items…</div>}
+              {repError && <div className="status-banner error">{repError}</div>}
+              {repLoading && <div className="status-banner loading">Loading rep items…</div>}
 
-              {!workLoading && workItems.length === 0 && !workError && (
+              {!repLoading && repItems.length === 0 && !repError && (
                 <div className="empty-panel">
                   <h3>No work items yet</h3>
                   <p>Add your first piece of past work using the button above.</p>
                 </div>
               )}
 
-              {!workLoading && workItems.length > 0 && (
+              {!repLoading && repItems.length > 0 && (
                 <div className="work-grid">
-                  {workItems.map((item) => (
-                    <WorkCard
+                  {repItems.map((item) => (
+                    <RepItemCard
                       key={item.id}
                       item={item}
-                      onEdit={openEditWorkForm}
-                      onDelete={handleWorkDelete}
+                      onEdit={openEditRepForm}
+                      onDelete={handleRepDelete}
                     />
                   ))}
                 </div>
-              )}
+              )}  
 
-              {showWorkForm && (
-                <WorkForm
-                  initialItem={editingWork}
-                  onSubmit={handleWorkSubmit}
-                  onClose={closeWorkForm}
-                  saving={savingWork}
+              {showRepForm && (
+                <RepItemForm
+                  initialItem={editingRep}
+                  onSubmit={handleRepSubmit}
+                  onClose={closeRepForm}
+                  saving={savingRep}
                 />
               )}
             </>

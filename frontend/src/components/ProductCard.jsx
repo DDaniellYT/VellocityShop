@@ -105,7 +105,7 @@ export default function ProductCard({
         <h3 className="product-name">{product.name}</h3>
         <p className="product-desc">{product.description}</p>
         <div className="product-footer">
-          <span className="product-price">${Number(product.price).toFixed(2)}</span>
+          <span className="product-price">{Number(product.price).toFixed(2)} RON</span>
           <span className="product-stock">{product.stock} in stock</span>
         </div>
         {(onEdit || onDelete) && (

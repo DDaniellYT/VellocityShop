@@ -561,7 +561,7 @@ a {
 
 /* ---------------- Product Detail ---------------- */
 .product-detail-section {
-  padding-top: 70px;
+  padding-top: 80px;
   min-height: 92vh;
 }
 
@@ -1340,7 +1340,7 @@ a {
   }
 
   .section {
-    padding: 48px 20px;
+    padding: 80px 20px;
   }
 
   .section-header h2 {

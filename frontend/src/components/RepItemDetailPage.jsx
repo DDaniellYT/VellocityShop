@@ -39,7 +39,7 @@ export default function RepItemDetailPage() {
       <section className="section product-detail-section">
         
 
-        {loading &&<Link to="/?view=work#products" className="quote-note">← Back to our work</Link> && <div className="status-banner loading">Loading item…</div>}
+        {loading && <div className="status-banner loading">Loading item…</div>}
 
         {!loading && error && (
           <div className="empty-panel">

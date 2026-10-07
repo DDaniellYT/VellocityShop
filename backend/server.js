@@ -785,17 +785,24 @@ app.post("/api/auth/register", registerLimiter, async (req, res) => {
   }
 
   const existingUsername = db
-    .prepare("SELECT id FROM users WHERE username = ?")
-    .get(normalizedUsername);
-  if (existingUsername) {
+  .prepare("SELECT id, email_verified FROM users WHERE username = ?")
+  .get(normalizedUsername);
+
+const existingEmail = db
+  .prepare("SELECT id, email_verified FROM users WHERE email = ?")
+  .get(normalizedEmail);
+
+  // A verified account can never be overwritten.
+  if (existingUsername && existingUsername.email_verified) {
     return res.status(409).json({ error: "That username is already taken" });
   }
 
-  const existingEmail = db.prepare("SELECT id FROM users WHERE email = ?").get(normalizedEmail);
-  if (existingEmail) {
+  if (existingEmail && existingEmail.email_verified) {
     return res.status(409).json({ error: "That email is already registered" });
   }
 
+  // If the email belongs to an unverified account, we'll restart that
+  // registration below instead of blocking the user permanently.
   // Make sure email settings exist before creating the account.
   if (!APP_URL) {
     console.error("APP_URL is missing");
@@ -805,53 +812,146 @@ app.post("/api/auth/register", registerLimiter, async (req, res) => {
     console.error("BREVO_KEY is missing");
     return res.status(500).json({ error: "Email service is not configured." });
   }
+const hash = await bcrypt.hash(password, 10);
+const verifyToken = crypto.randomBytes(32).toString("hex");
+const verifyExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-  const hash = await bcrypt.hash(password, 10);
-  const verifyToken = crypto.randomBytes(32).toString("hex");
-  const verifyExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+let userId;
+let isRestartingRegistration = false;
 
-  // Create the account and verification record together.
-  const createAccount = db.transaction(() => {
+try {
+  const createOrRestartAccount = db.transaction(() => {
+    // If this email already belongs to an unverified account,
+    // restart that account's registration instead of creating a duplicate.
+    if (existingEmail && !existingEmail.email_verified) {
+      const user = db
+        .prepare("SELECT id FROM users WHERE id = ?")
+        .get(existingEmail.id);
+
+      if (!user) {
+        throw new Error("Existing registration account disappeared");
+      }
+
+      // Don't allow the new username to collide with another account.
+      if (
+        existingUsername &&
+        existingUsername.id !== existingEmail.id
+      ) {
+        throw Object.assign(
+          new Error("That username is already taken"),
+          { code: "USERNAME_TAKEN" }
+        );
+      }
+
+      // Replace the old verification token.
+      db.prepare(
+        "DELETE FROM email_verifications WHERE user_id = ?"
+      ).run(existingEmail.id);
+
+      db.prepare(
+        `UPDATE users
+         SET username = ?, email = ?, password_hash = ?, email_verified = 0
+         WHERE id = ?`
+      ).run(
+        normalizedUsername,
+        normalizedEmail,
+        hash,
+        existingEmail.id
+      );
+
+      db.prepare(
+        `INSERT INTO email_verifications
+         (user_id, token, expires_at)
+         VALUES (?, ?, ?)`
+      ).run(
+        existingEmail.id,
+        verifyToken,
+        verifyExpiresAt
+      );
+
+      isRestartingRegistration = true;
+      return existingEmail.id;
+    }
+
+    // Otherwise create a completely new account.
     const result = db
       .prepare(
-        `INSERT INTO users (username, email, password_hash, role, email_verified)
+        `INSERT INTO users
+         (username, email, password_hash, role, email_verified)
          VALUES (?, ?, ?, 'customer', 0)`
       )
-      .run(normalizedUsername, normalizedEmail, hash);
+      .run(
+        normalizedUsername,
+        normalizedEmail,
+        hash
+      );
 
     db.prepare(
-      "INSERT INTO email_verifications (user_id, token, expires_at) VALUES (?, ?, ?)"
-    ).run(result.lastInsertRowid, verifyToken, verifyExpiresAt);
+      `INSERT INTO email_verifications
+       (user_id, token, expires_at)
+       VALUES (?, ?, ?)`
+    ).run(
+      result.lastInsertRowid,
+      verifyToken,
+      verifyExpiresAt
+    );
 
     return result.lastInsertRowid;
   });
 
-  let userId;
-  try {
-    userId = createAccount();
-  } catch (err) {
-    // Two simultaneous registrations can slip past the SELECT checks above.
-    if (err && String(err.code).startsWith("SQLITE_CONSTRAINT")) {
-      return res.status(409).json({ error: "That username or email is already registered" });
-    }
-    throw err;
-  }
-
-  try {
-    await sendVerificationEmail(normalizedEmail, verifyToken);
-  } catch (err) {
-    console.error("Failed to send verification email:", err);
-
-    // Remove the account/token if email delivery failed.
-    db.transaction(() => {
-      db.prepare("DELETE FROM email_verifications WHERE user_id = ?").run(userId);
-      db.prepare("DELETE FROM users WHERE id = ?").run(userId);
-    })();
-
-    return res.status(500).json({
-      error: "Your account could not be created because the verification email could not be sent.",
+  userId = createOrRestartAccount();
+} catch (err) {
+  if (err && err.code === "USERNAME_TAKEN") {
+    return res.status(409).json({
+      error: "That username is already taken",
     });
   }
+
+  if (err && String(err.code).startsWith("SQLITE_CONSTRAINT")) {
+    return res.status(409).json({
+      error: "That username or email is already registered",
+    });
+  }
+
+  throw err;
+}
+
+  try {
+  await sendVerificationEmail(normalizedEmail, verifyToken);
+} catch (err) {
+  console.error("Failed to send verification email:", err);
+
+  if (isRestartingRegistration) {
+    // The account existed before this registration attempt.
+    // Restore it to an unverified state and remove the new token.
+    db.transaction(() => {
+      db.prepare(
+        "DELETE FROM email_verifications WHERE user_id = ?"
+      ).run(userId);
+
+      // Keep the account so the user can simply try again.
+      db.prepare(
+        "UPDATE users SET email_verified = 0 WHERE id = ?"
+      ).run(userId);
+    })();
+  } else {
+    // This was a brand-new account, so completely roll it back.
+    db.transaction(() => {
+      db.prepare(
+        "DELETE FROM email_verifications WHERE user_id = ?"
+      ).run(userId);
+
+      db.prepare(
+        "DELETE FROM users WHERE id = ?"
+      ).run(userId);
+    })();
+  }
+
+  return res.status(500).json({
+    error:
+      "The verification email could not be sent. Please try again.",
+  });
+}
 
   return res.status(201).json({
     message: "Account created. Check your email to verify your account.",
@@ -1086,17 +1186,23 @@ app.post("/api/upload", requireAdmin, upload.single("image"), async (req, res) =
   res.status(201).json({ url: `/uploads/${req.file.filename}` });
 });
 
+
 app.get("/api/carousel", (req, res) => {
   const allowed = /\.(png|jpe?g|webp|gif|avif)$/i;
+
   let files = [];
+
   try {
-    files = fs.readdirSync(carouselDir).filter((f) => allowed.test(f)).sort();
+    files = fs
+      .readdirSync(carouselDir)
+      .filter((f) => allowed.test(f))
+      .sort();
   } catch (err) {
     console.error("Could not read carousel directory:", err.message);
   }
+
   res.json(files.map((f) => `/carousel/${f}`));
 });
-
 // ---------------------------------------------------------------------------
 // Orders
 // ---------------------------------------------------------------------------

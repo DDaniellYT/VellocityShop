@@ -36,6 +36,15 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
+export function getImageUrl(path) {
+  if (!path) return null;
+
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+
+  return `${api.defaults.baseURL}${path}`;
+}
 export const getCarouselImages = () =>
   client.get("/carousel");
 

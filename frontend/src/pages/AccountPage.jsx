@@ -6,16 +6,6 @@ import Footer from "../components/Footer.jsx";
 import { getMyOrders } from "../api.js";
 import Order from "../components/Order.jsx";
 
-function getTrackingUrl(carrier, awbNumber) {
-  if (!awbNumber) return null;
-  if (carrier === "Sameday") {
-    // Sameday's public tracker lives at sameday.ro under "Check AWB".
-    // Double check this deep-link query param still works — if not, this
-    // just falls back to sameday.ro itself with the number visible to copy in.
-    return `https://sameday.ro/?awb=${encodeURIComponent(awbNumber)}&lang=en`;
-  }
-  return null;
-}
 
 export default function AccountPage() {
   const navigate = useNavigate();

@@ -14,7 +14,9 @@ export default function Carousel() {
         // API should return image paths such as:
         // /uploads/carousel/image1.jpg
         // /uploads/carousel/image2.jpg
-        setImages(res.data);
+        setImages(
+          res.data.map((path) => `https://vellocityshop-production.up.railway.app${path}`)
+        );
       } catch (err) {
         console.error("Failed to load carousel images:", err);
         setImages([]);

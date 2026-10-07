@@ -5,13 +5,16 @@ import { AuthProvider } from "./AuthContext.jsx";
 import { CartProvider } from "./CartContext.jsx";   // add this import
 import App from "./App.jsx";
 import "./index.css";
+import { Analytics } from "@vercel/analytics/react";
+
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <CartProvider>          {/* wrap App in this */}
+        <CartProvider>         
           <App />
+          <Analytics />
         </CartProvider>
       </AuthProvider> 
     </BrowserRouter>
